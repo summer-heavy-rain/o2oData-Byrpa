@@ -1,0 +1,6 @@
+[build]
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# 每天 03:00 UTC = 11:00 CST
+cronSchedule = "0 3 * * *"

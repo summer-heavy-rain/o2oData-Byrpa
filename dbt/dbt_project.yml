@@ -1,0 +1,25 @@
+name: o2o_data_warehouse
+version: "1.0.0"
+config-version: 2
+
+profile: o2o_dw
+
+model-paths: ["models"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+analysis-paths: ["analyses"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  o2o_data_warehouse:
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: table
+      +schema: dwd
+    marts:
+      +materialized: table
+      +schema: dws

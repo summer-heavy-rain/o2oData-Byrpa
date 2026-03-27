@@ -1,0 +1,233 @@
+# ============================================================
+# O2O 数据源配置 v1
+# 用途: Python 脚本读取此文件获取数据地址、解析规则、ODS 目标表
+# 路径中 {date} 占位符在运行时替换为 YYYY-MM-DD
+# ============================================================
+
+version: 1
+
+global:
+  smb_base: "\\\\192.168.1.49\\数仓rpa文件\\数据组文件"
+  date_pattern: "YYYY-MM-DD"
+  ods_schema: "public"
+  meta_columns:
+    - { name: "dt", type: "DATE", description: "分区日期，从文件夹名提取" }
+    - { name: "_source_file", type: "TEXT", description: "来源文件名" }
+    - { name: "_load_time", type: "TIMESTAMPTZ", description: "入库时间" }
+
+sources:
+
+  # ================================================================
+  # 迷你橙 — txt 指定 2 个文件（目录下实际有 6 个，只读指定的）
+  # ================================================================
+  mini_orange:
+    display_name: "迷你橙"
+    folder: "【数据组】mini橙数据导出"
+    discovery_mode: "explicit"
+    files:
+      - filename: "mini橙-订单商品明细.xlsx"
+        format: "xlsx"
+        sheet: 0
+        header_row: 1
+        target_table: "ods_rpa_miniorange_order_detail"
+        extra_columns:
+          _store_type: "直营"
+
+      - filename: "mini橙-订单商品明细（加盟）.xlsx"
+        format: "xlsx"
+        sheet: 0
+        header_row: 1
+        target_table: "ods_rpa_miniorange_order_detail"
+        extra_columns:
+          _store_type: "加盟"
+
+  # ================================================================
+  # 饿了么 — 8 个文件: 订单×3 + 推广×2 + 财务×3
+  # 3 个账号后缀: (无后缀)=默认 / (善培臣) / (自营)
+  # 账号类型从文件名自动提取，写入 _account_type 列
+  # ================================================================
+  eleme:
+    display_name: "饿了么"
+    folder: "【数据组】饿了么数据导出"
+    discovery_mode: "all"
+    account_type_extract:
+      pattern: "\\((.+?)\\)"
+      default: "默认"
+    file_rules:
+      # --- 订单 ---
+      - match: "饿了么-订单*.xlsx"
+        format: "xlsx"
+        sheet: "订单导出"
+        header_row: 1
+        target_table: "ods_rpa_eleme_order"
+
+      # --- 推广数据 ---
+      - match: "饿了么-推广数据*.xlsx"
+        format: "xlsx"
+        sheet: 0
+        header_row: 1
+        target_table: "ods_rpa_eleme_promotion"
+
+      # --- 财务账单（多 sheet，每个 sheet → 独立 ODS 表）---
+      - match: "饿了么-财务账单*.xlsx"
+        format: "xlsx_multi_sheet"
+        sheets:
+          - sheet: "全部账单汇总"
+            header_row: 1
+            target_table: "ods_rpa_eleme_fin_summary"
+
+          - sheet: "销售账单汇总"
+            header_row: 1
+            target_table: "ods_rpa_eleme_fin_sales_summary"
+
+          - sheet: "销售账单明细"
+            header_row: 1
+            header_rows: 2
+            merge_strategy: "group_sub"
+            target_table: "ods_rpa_eleme_fin_sales_detail"
+
+          - sheet: "代运营账单明细"
+            header_row: 1
+            target_table: "ods_rpa_eleme_fin_operation"
+
+          - sheet: "CPS账单明细"
+            header_row: 1
+            target_table: "ods_rpa_eleme_fin_cps"
+
+          - sheet: "卡券账单汇总"
+            header_row: 1
+            target_table: "ods_rpa_eleme_fin_coupon_summary"
+
+          - sheet: "卡券账单明细"
+            header_row: 1
+            target_table: "ods_rpa_eleme_fin_coupon_detail"
+
+          - sheet: "激励账单"
+            header_row: 1
+            target_table: "ods_rpa_eleme_fin_incentive"
+
+          - sheet: "全能半托管销售账单汇总"
+            header_row: 1
+            target_table: "ods_rpa_eleme_fin_semi_summary"
+
+          - sheet: "全能半托管销售账单明细"
+            header_row: 1
+            header_rows: 2
+            merge_strategy: "group_sub"
+            target_table: "ods_rpa_eleme_fin_semi_detail"
+
+          - sheet: "全能半托管销售商品账单"
+            header_row: 1
+            header_rows: 2
+            merge_strategy: "group_sub"
+            target_table: "ods_rpa_eleme_fin_semi_product"
+
+          - sheet: "付费问诊账单明细"
+            header_row: 1
+            target_table: "ods_rpa_eleme_fin_inquiry"
+
+          - sheet: "渠道费用账单汇总"
+            header_row: 1
+            target_table: "ods_rpa_eleme_fin_channel_summary"
+
+          - sheet: "渠道费用账单明细"
+            header_row: 1
+            target_table: "ods_rpa_eleme_fin_channel_detail"
+
+          - sheet: "退货运费账单汇总"
+            header_row: 1
+            target_table: "ods_rpa_eleme_fin_return_summary"
+
+          - sheet: "退货运费账单明细"
+            header_row: 1
+            header_rows: 2
+            merge_strategy: "group_sub"
+            target_table: "ods_rpa_eleme_fin_return_detail"
+
+        skip_sheets:
+          - "账单字段说明"
+
+  # ================================================================
+  # 京东 — 2 个文件，注意格式陷阱
+  # ================================================================
+  jd:
+    display_name: "京东"
+    folder: "【数据组】京东数据导出"
+    discovery_mode: "all"
+    skip_non_data_files:
+      - "warn.docx"
+    file_rules:
+      - match: "订单查询.xlsx"
+        format: "html_as_xlsx"
+        encoding: "utf-8"
+        target_table: "ods_rpa_jd_order"
+
+      - match: "账单下载.xlsx"
+        format: "xlsx"
+        sheet: "sku对账单下载"
+        header_row: 1
+        target_table: "ods_rpa_jd_finance"
+
+  # ================================================================
+  # 麦芽田 — 按门店分文件，数量动态（当前5个），缺失必须报错
+  # 门店名从文件名自动提取，写入 _store_name 列
+  # ================================================================
+  maiyatian:
+    display_name: "麦芽田"
+    folder: "【数据组】麦芽田数据导出"
+    discovery_mode: "all"
+    min_files: 5
+    store_name_extract:
+      pattern: "麦芽田-报表中心（(.+?)）"
+    file_rules:
+      - match: "麦芽田-报表中心*.xlsx"
+        format: "xml_as_xlsx"
+        encoding: "utf-8"
+        target_table: "ods_rpa_maiyatian_delivery"
+
+  # ================================================================
+  # 美团 — CSV(商品) + XLSX(账单)，按门店分文件
+  # 门店名从文件名自动提取，写入 _store_name 列
+  # ================================================================
+  meituan:
+    display_name: "美团"
+    folder: "【数据组】美团数据导出"
+    discovery_mode: "all"
+    store_name_extract:
+      pattern: "[（(](.+?)[)）]"
+    file_rules:
+      # --- 商品明细 CSV ---
+      - match: "美团-商品明细*.csv"
+        format: "csv"
+        encoding: "gbk"
+        header_row: 1
+        target_table: "ods_rpa_meituan_product_detail"
+
+      # --- 账单 XLSX（多 sheet）---
+      - match: "美团-账单*.xlsx"
+        format: "xlsx_multi_sheet"
+        sheets:
+          - sheet: "账单明细"
+            header_row: 2
+            skip_rows: [1]
+            target_table: "ods_rpa_meituan_fin_bill"
+
+          - sheet: "订单明细"
+            header_row: 2
+            header_rows: 2
+            merge_strategy: "group_sub"
+            skip_rows: [1]
+            target_table: "ods_rpa_meituan_fin_order"
+
+          - sheet: "处罚&赔付"
+            header_row: 2
+            skip_rows: [1]
+            target_table: "ods_rpa_meituan_fin_penalty"
+
+          - sheet: "健康卡费用商家部分"
+            header_row: 1
+            target_table: "ods_rpa_meituan_fin_health_card"
+
+        skip_sheets:
+          - "汇总信息"
+          - "账单字段说明"

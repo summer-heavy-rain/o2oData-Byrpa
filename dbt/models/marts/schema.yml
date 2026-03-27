@@ -1,0 +1,41 @@
+version: 2
+
+models:
+  - name: ads_o2o_daily_report
+    description: "O2O 业务日报 ADS 表 — 按日×平台×门店粒度的经营指标"
+    columns:
+      - name: dt
+        description: "日期"
+        tests: [not_null]
+      - name: platform
+        description: "平台（饿了么/京东/美团）"
+        tests: [not_null]
+      - name: store_name
+        description: "门店简称（如余杭店、首南店）"
+        tests: [not_null]
+      - name: revenue
+        description: "实收金额（含包装费/区域补贴）"
+      - name: cost
+        description: "招商货品成本合计（TODO: 需 JOIN dim_product.headquarters_price）"
+      - name: gross_profit
+        description: "总部招商利润（不含房租人工）= revenue - cost - promotion_cost"
+      - name: shipping_cost
+        description: "日报运费（来自麦芽田配送数据）"
+      - name: avg_shipping
+        description: "单均运费 = shipping_cost / order_count"
+      - name: platform_fee
+        description: "平台/支付服务费"
+      - name: delivery_distance
+        description: "订单距离合计（来自麦芽田）"
+      - name: order_count
+        description: "票数（订单数）"
+      - name: avg_distance
+        description: "平均订单距离 = delivery_distance / order_count"
+      - name: rent_labor
+        description: "店租金/人工预估（TODO: 需 dim_store 维度）"
+      - name: promotion_cost
+        description: "推广费（饿了么推广数据）"
+      - name: net_profit
+        description: "利润 = gross_profit - rent_labor"
+      - name: store_type
+        description: "门店类型（直营/加盟）"

@@ -1,0 +1,17 @@
+# 复制为 profiles.yml 并填入实际连接信息
+# 也可以放在 ~/.dbt/profiles.yml（dbt 默认位置）
+o2o_dw:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: "{{ env_var('SUPABASE_DB_HOST') }}"
+      port: 5432
+      user: "{{ env_var('SUPABASE_DB_USER', 'postgres') }}"
+      password: "{{ env_var('SUPABASE_DB_PASSWORD') }}"
+      dbname: "{{ env_var('SUPABASE_DB_NAME', 'postgres') }}"
+      schema: public
+      threads: 4
+      keepalives_idle: 0
+      connect_timeout: 30
+      sslmode: require

@@ -1,0 +1,81 @@
+version: 2
+
+sources:
+  - name: rpa_o2o
+    description: "O2O 平台 RPA 导出数据（贴源层，全 TEXT，按日分区）"
+    schema: public
+    loader: "scripts/ingest.py"
+    loaded_at_field: "_load_time"
+    freshness:
+      warn_after: { count: 2, period: day }
+      error_after: { count: 3, period: day }
+
+    tables:
+      # ── 迷你橙 ──
+      - name: ods_rpa_miniorange_order_detail
+        description: "mini橙订单商品明细（直营+加盟，_store_type 区分）"
+        columns:
+          - { name: dt, description: "分区日期" }
+          - { name: _source_file, description: "来源文件名" }
+          - { name: _load_time, description: "入库时间" }
+          - { name: _store_type, description: "直营/加盟" }
+
+      # ── 饿了么 ──
+      - name: ods_rpa_eleme_order
+        description: "饿了么订单导出（58列 + 账号类型）"
+      - name: ods_rpa_eleme_promotion
+        description: "饿了么推广数据（20列 + 账号类型）"
+      - name: ods_rpa_eleme_fin_summary
+        description: "饿了么财务-全部账单汇总"
+      - name: ods_rpa_eleme_fin_sales_summary
+        description: "饿了么财务-销售账单汇总"
+      - name: ods_rpa_eleme_fin_sales_detail
+        description: "饿了么财务-销售账单明细（合并表头展平）"
+      - name: ods_rpa_eleme_fin_operation
+        description: "饿了么财务-代运营账单"
+      - name: ods_rpa_eleme_fin_cps
+        description: "饿了么财务-CPS账单"
+      - name: ods_rpa_eleme_fin_coupon_summary
+        description: "饿了么财务-卡券汇总"
+      - name: ods_rpa_eleme_fin_coupon_detail
+        description: "饿了么财务-卡券明细"
+      - name: ods_rpa_eleme_fin_incentive
+        description: "饿了么财务-激励账单"
+      - name: ods_rpa_eleme_fin_semi_summary
+        description: "饿了么财务-半托管汇总"
+      - name: ods_rpa_eleme_fin_semi_detail
+        description: "饿了么财务-半托管明细（合并表头展平）"
+      - name: ods_rpa_eleme_fin_semi_product
+        description: "饿了么财务-半托管商品账单（合并表头展平）"
+      - name: ods_rpa_eleme_fin_inquiry
+        description: "饿了么财务-付费问诊"
+      - name: ods_rpa_eleme_fin_channel_summary
+        description: "饿了么财务-渠道费用汇总"
+      - name: ods_rpa_eleme_fin_channel_detail
+        description: "饿了么财务-渠道费用明细"
+      - name: ods_rpa_eleme_fin_return_summary
+        description: "饿了么财务-退货运费汇总"
+      - name: ods_rpa_eleme_fin_return_detail
+        description: "饿了么财务-退货运费明细（合并表头展平）"
+
+      # ── 京东 ──
+      - name: ods_rpa_jd_order
+        description: "京东小时达-订单查询（HTML格式，79列）"
+      - name: ods_rpa_jd_finance
+        description: "京东小时达-SKU对账单（26列）"
+
+      # ── 麦芽田 ──
+      - name: ods_rpa_maiyatian_delivery
+        description: "麦芽田配送报表（按门店分文件，30列 + _store_name）"
+
+      # ── 美团 ──
+      - name: ods_rpa_meituan_product_detail
+        description: "美团买药-商品明细CSV（GBK，38列 + _store_name）"
+      - name: ods_rpa_meituan_fin_bill
+        description: "美团买药-账单明细（10列 + _store_name）"
+      - name: ods_rpa_meituan_fin_order
+        description: "美团买药-订单明细（64列合并表头 + _store_name）"
+      - name: ods_rpa_meituan_fin_penalty
+        description: "美团买药-处罚与赔付（15列 + _store_name）"
+      - name: ods_rpa_meituan_fin_health_card
+        description: "美团买药-健康卡费用（10列 + _store_name）"

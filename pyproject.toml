@@ -1,0 +1,27 @@
+[project]
+name = "o2o-data-byrpa"
+version = "0.1.0"
+description = "O2O 平台 RPA 数据采集 → Supabase 数仓入库管道"
+requires-python = ">=3.11"
+dependencies = [
+    "pyyaml",
+    "pandas",
+    "openpyxl",
+    "lxml",
+    "sqlalchemy",
+    "psycopg2-binary",
+]
+
+[project.optional-dependencies]
+dbt = [
+    "dbt-core",
+    "dbt-postgres",
+]
+dev = [
+    "pytest",
+    "ruff",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
