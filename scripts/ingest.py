@@ -21,6 +21,14 @@ import pandas as pd
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+_env_file = Path(__file__).parent.parent / ".env"
+if _env_file.exists():
+    for line in _env_file.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            os.environ.setdefault(k.strip(), v.strip())
+
 from scripts.config_loader import (
     FileRule,
     SourceConfig,
@@ -150,11 +158,13 @@ def process_source(source: SourceConfig, dt: date, manifest, *, discover_only: b
 
 
 def upload_to_supabase(table: str, df: pd.DataFrame, dt: date):
-    """上传 DataFrame 到 Supabase ODS 表"""
+    """上传 DataFrame 到 Supabase ODS 表（普通表 + dt 列实现逻辑日分区）"""
     db_url = os.environ.get("DATABASE_URL")
     if not db_url:
         log.error("DATABASE_URL 未设置，跳过上传")
         return
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql://", 1)
 
     try:
         import sqlalchemy
@@ -164,30 +174,55 @@ def upload_to_supabase(table: str, df: pd.DataFrame, dt: date):
 
     engine = sqlalchemy.create_engine(db_url)
 
-    partition_name = f"{table}_{dt.strftime('%Y%m%d')}"
-
     with engine.begin() as conn:
-        conn.execute(
+        has_table = conn.execute(
             sqlalchemy.text(
-                f"CREATE TABLE IF NOT EXISTS {partition_name} "
-                f"PARTITION OF {table} "
-                f"FOR VALUES FROM ('{dt}') TO ('{dt + timedelta(days=1)}')"
+                "SELECT 1 FROM information_schema.tables "
+                "WHERE table_schema='public' AND table_name=:t"
+            ),
+            {"t": table},
+        ).fetchone()
+
+        if has_table:
+            conn.execute(
+                sqlalchemy.text(f'DELETE FROM "{table}" WHERE dt = :dt'),
+                {"dt": str(dt)},
             )
-        )
-        conn.execute(
-            sqlalchemy.text(f"DELETE FROM {partition_name} WHERE dt = :dt"),
-            {"dt": dt},
-        )
+            existing_cols = {
+                r[0]
+                for r in conn.execute(
+                    sqlalchemy.text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema='public' AND table_name=:t"
+                    ),
+                    {"t": table},
+                ).fetchall()
+            }
+            for c in df.columns:
+                if c not in existing_cols:
+                    conn.execute(sqlalchemy.text(
+                        f'ALTER TABLE "{table}" ADD COLUMN "{c}" TEXT'
+                    ))
+        else:
+            cols_sql = ", ".join(
+                f'"{c}" TEXT' for c in df.columns
+            )
+            conn.execute(sqlalchemy.text(
+                f'CREATE TABLE "{table}" ({cols_sql})'
+            ))
+            conn.execute(sqlalchemy.text(
+                f'CREATE INDEX IF NOT EXISTS idx_{table}_dt ON "{table}" (dt)'
+            ))
 
     df.to_sql(
-        partition_name,
+        table,
         engine,
         if_exists="append",
         index=False,
         method="multi",
         chunksize=1000,
     )
-    log.info(f"  ✓ {table} 已上传 {len(df)} 行 (分区: {partition_name})")
+    log.info(f"  ✓ {table} 已上传 {len(df)} 行")
 
 
 def main():

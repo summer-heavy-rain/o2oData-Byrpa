@@ -79,3 +79,32 @@ sources:
         description: "美团买药-处罚与赔付（15列 + _store_name）"
       - name: ods_rpa_meituan_fin_health_card
         description: "美团买药-健康卡费用（10列 + _store_name）"
+      - name: ods_rpa_meituan_promotion
+        description: "美团买药-推广费流水（日粒度×门店，amount=实际扣款金额，来源：推广美团自营.xlsx）"
+
+  - name: o2o_ref
+    description: "O2O 日报自有参考维度表（由 o2oData-Byrpa 脚本独立维护，不依赖 union-agent）"
+    schema: public
+
+    tables:
+      - name: dim_o2o_store_ref
+        description: "O2O门店参考表（门店简称/省份/城市/日均房租人工，来源：房租水电成本.xls）"
+        columns:
+          - { name: store_short_name, description: "门店简称，关联各平台订单数据" }
+          - { name: province,         description: "省份" }
+          - { name: city,             description: "城市" }
+          - { name: daily_rent_labor, description: "日均房租+人工费用（元/天）" }
+      - name: dim_o2o_sku_mapping
+        description: "O2O编码→金蝶编码映射（含换算比例+总部招商价，来源：编码匹配.xls）"
+
+  - name: union_dim
+    description: "union-agent 管理的维度表（同 schema，外部维护，O2O日报尽量不依赖此源）"
+    schema: public
+
+    tables:
+      - name: dim_store
+        description: "O2O门店基础信息（40家）"
+      - name: ods_miniorange_order_item
+        description: "mini橙订单商品明细（~183万行）"
+      - name: ods_miniorange_store
+        description: "mini橙门店列表（53家）"

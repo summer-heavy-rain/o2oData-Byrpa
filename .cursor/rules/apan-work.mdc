@@ -1,0 +1,136 @@
+---
+description: 阿潘的工作约束——O2O 日报经营指标计算建模。当阿潘需要修改或新建经营指标时加载此规则。
+globs: ["dbt/models/intermediate/**", "sql/**"]
+alwaysApply: false
+---
+
+# 阿潘的工作上下文
+
+## 你在帮谁
+
+你在帮阿潘（数据专员，非程序员）调整 O2O 日报的经营指标计算模型。
+阿潘懂业务——他知道"收入应该怎么算"、"哪些费用该扣哪些不该扣"，但不熟悉代码。
+你的职责是：**把阿潘的业务描述翻译成正确的 SQL，写到正确的文件里。**
+
+## 项目背景
+
+这个项目从各平台 RPA 导出的 Excel 数据（已入库到 PostgreSQL）出发，用 dbt 计算 O2O 门店日报。
+
+数据流：
+```
+各平台 Excel → 入库脚本 → ods_rpa_* 表（原始数据）
+    → dbt staging（清洗）→ dbt intermediate（指标计算）→ dbt marts（最终日报表）
+```
+
+日报的最终产出是 `ads_o2o_daily_report` 表，按 **日期 × 平台 × 门店** 粒度，每行一个门店在某平台某天的经营数据。
+
+## 当前目标
+
+以 **2026-03-25** 的数据为样本，让 AI 计算出的日报数字和人工已经做好的日报（3.25校验表）对齐。
+校验基准：收入 ¥81,152 / 成本 ¥53,324 / 招商利润 ¥21,216 / 房租人工 ¥18,623 / 净利润 ¥2,592。
+一旦 3.25 对齐，这套计算模型就能自动应用到每一天。
+
+## ⚠️ 阿潘可以改什么
+
+### ✅ 可以改的文件（只有这 4 个 + sql/ 目录）
+
+```
+dbt/models/intermediate/
+├── int_item_cost.sql          ← 成本怎么算
+├── int_maiyatian_shipping.sql ← 麦芽田运费怎么算
+├── int_platform_revenue.sql   ← 各平台收入/平台费/运费/订单数怎么聚合
+└── int_promotion_cost.sql     ← 推广费怎么算
+
+sql/                           ← 即席验证查询，可以随便加
+```
+
+### 🚫 不能碰的文件
+
+- `dbt/models/staging/` 下的所有文件（原始数据清洗，改了会影响所有下游）
+- `dbt/models/marts/ads_o2o_daily_report.sql`（利润公式和最终汇总）
+- `dbt/models/staging/_sources.yml`（数据源声明）
+- `scripts/` 下的所有 Python 文件（数据导入管道）
+- `config/` 下的配置文件
+- `.env` / `Dockerfile` / `pyproject.toml` 等基础设施文件
+
+**如果阿潘的需求需要改上面这些文件，告诉他"这个需要骆铭源来改"，不要自己动。**
+
+### ✅ 可以新建文件
+
+阿潘可以在 `dbt/models/intermediate/` 下新建 `int_xxx.sql` 文件（比如新增一个指标），但新文件建好后需要通知骆铭源在最终报表里"接线"（加 JOIN）。
+
+## 数据源速查（阿潘说"美团的收入"时，AI 去查这些表）
+
+| 阿潘说的 | 对应的数据库表 | 关键字段 |
+|---------|--------------|---------|
+| 美团账单/美团收入 | `ods_rpa_meituan_fin_order` | 商家应收款、佣金、配送服务费、基础信息_订单号 |
+| 美团商品明细 | `ods_rpa_meituan_product_detail` | 订单编号、商品销售数量、订单实付交易额_元 |
+| 饿了么财务/饿了么收入 | `ods_rpa_eleme_fin_sales_detail` | 净营业额合计、平台交易技术服务费、订单号_col_6 |
+| 饿了么订单 | `ods_rpa_eleme_order` | 商户应收金额、订单编号、订单状态 |
+| 饿了么推广 | `ods_rpa_eleme_promotion` | 推广消费_元、门店名称、日期 |
+| 京东账单 | `ods_rpa_jd_finance` | 结算金额、到家业务单号、费用类型 |
+| 京东订单 | `ods_rpa_jd_order` | 门店名称、门店ID、订单编号 |
+| 麦芽田配送 | `ods_rpa_maiyatian_delivery` | 总配送费、配送门店、配送距离、状态 |
+| 美团推广费 | `ods_rpa_meituan_promotion` | amount、store_name、dt |
+| mini橙商品明细 | `ods_rpa_miniorange_order_detail` | 商品编码、商品数量、门店名称、渠道、订单状态 |
+| 编码匹配/成本映射 | `dim_o2o_sku_mapping` | mini_code、kingdee_code、headquarters_price、kingdee_qty、mini_qty |
+| 房租水电 | `dim_o2o_store_ref` | store_short_name、daily_rent_labor、province、city |
+
+## 当前各指标的计算方式（阿潘需要核对这些对不对）
+
+### 收入（int_platform_revenue.sql）
+- **美团**：`ods_rpa_meituan_fin_order` 的 `商家应收款` 求和（取消订单剔除）
+- **饿了么**：`ods_rpa_eleme_fin_sales_detail` 的 `净营业额合计` 求和
+- **京东**：`ods_rpa_jd_finance` 的 `结算金额`，排除佣金和配送费类型后的正数求和
+
+### 成本（int_item_cost.sql）
+- 从 `ods_rpa_miniorange_order_detail`（mini橙商品明细）取每件商品的编码和数量
+- 用 `dim_o2o_sku_mapping`（编码匹配表）找到对应的总部招商价
+- 公式：`总部招商价 × 商品数量 × (金蝶数量 / mini橙数量)`
+- 按 日期×门店×平台 汇总
+
+### 运费（int_maiyatian_shipping.sql）
+- 只算麦芽田第三方配送费，`总配送费` 按门店求和
+- 已取消的不算
+
+### 推广费（int_promotion_cost.sql）
+- **美团**：`ods_rpa_meituan_promotion` 的 `amount` 按日期×门店求和
+- **饿了么**：`ods_rpa_eleme_promotion` 的 `推广消费_元` 取绝对值求和
+- **京东**：暂无推广数据
+
+### 利润公式（不在阿潘的修改范围内）
+```
+招商利润 = 收入 - 成本 - 平台费
+净利润 = 招商利润 - 房租人工
+运费和推广费 = 只展示，不参与利润扣减
+```
+
+## AI 帮阿潘改代码的规则
+
+1. **只改 `dbt/models/intermediate/` 下的文件**，绝不碰 staging / marts / scripts
+2. 每个文件开头都有 `{{ config(materialized='view') }}`，不要删也不要改
+3. 文件里的 `{{ source('rpa_o2o', '表名') }}` 和 `{{ ref('模型名') }}` 是 dbt 语法，不要换成直接写表名
+4. 改完后提醒阿潘执行验证：
+   ```bash
+   cd dbt
+   dbt run --profiles-dir .
+   ```
+5. 验证通过后，帮阿潘查一下数字：
+   ```sql
+   SELECT SUM(revenue), SUM(cost), SUM(gross_profit), SUM(net_profit)
+   FROM ads_o2o_daily_report WHERE dt = '2026-03-25';
+   ```
+6. 如果阿潘要新建指标文件，文件名必须以 `int_` 开头，放在 `dbt/models/intermediate/` 下
+7. 如果阿潘的需求超出 intermediate 文件的范围（比如要改利润公式、要改数据清洗），回复："这个需要骆铭源来改，我帮你整理一下需求描述发给他。"
+8. **阿潘说的业务逻辑优先**——他说"退款不算收入"、"运费应该按订单量分摊"，就按他说的改。他是业务侧，他比 AI 更懂这些数字该怎么算。
+
+## 阿潘改完后的提交流程
+
+```bash
+git checkout -b feature/阿潘改了什么
+git add dbt/models/intermediate/
+git commit -m "修改: 改了什么什么"
+git push origin feature/阿潘改了什么
+```
+
+然后告诉骆铭源"我推了一个分支"。不要直接 push 到 main。

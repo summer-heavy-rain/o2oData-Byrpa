@@ -26,7 +26,12 @@ dbt/profiles.yml
 .DS_Store
 Thumbs.db
 
-# Data
+# Data files (Excel/CSV 不入 git)
+data/
 *.parquet
 *.csv.gz
+*.xls
+*.xlsx
 _inspect.py
+logs/
+dbt/.user.yml
