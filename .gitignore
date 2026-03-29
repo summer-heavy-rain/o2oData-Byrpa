@@ -22,6 +22,12 @@ dbt/profiles.yml
 *.swp
 *.swo
 
+# Output (script artifacts)
+output/
+
+# Cursor IDE
+.cursor/
+
 # OS
 .DS_Store
 Thumbs.db

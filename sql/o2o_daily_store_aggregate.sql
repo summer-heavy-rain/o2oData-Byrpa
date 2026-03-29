@@ -2,13 +2,13 @@
 -- O2O 单日门店聚合（即席查询）
 -- =============================================================================
 -- 仓库：o2oData-Byrpa
--- 口径全文：docs/O2O单日门店聚合口径.md
+-- 结算与「待财务匹配」口径：docs/O2O结算匹配与待结转口径.md
 --
 -- 请勿在 union-agent 中维护本文件副本；友联主后端与 O2O RPA 计算职责分离。
 --
 -- 用途：
 --   * 在 PostgreSQL 中直接执行（或粘贴到客户端），按「业务约定口径」出门店日粒度宽表。
---   * 与 dbt/models/marts/ads_o2o_daily_report.sql 并存：实现路径不同，详见文档第六节。
+--   * 与 dbt/models/marts/ads_o2o_daily_report.sql 并存：实现路径不同。
 --
 -- 修改业务日时：只改下方 WITH params 中的两个 DATE。
 --
@@ -39,16 +39,10 @@ fixed_enriched AS (
 ),
 
 /* ---------------------------------------------------------------------------
-   美团：财务订单明细 ods_rpa_meituan_fin_order
-   商家应收：商家应收款；时间：下单时间；按订单号 DISTINCT ON 防重复行
-   企客返利：dim_store.meituan_enterprise_rebate（元/单，F06 企客报价导入）× 当日美团订单数
-   美团实收（含企客）：mt_receivable_amt + mt_qike_rebate_amt
-   剔除：基础信息_订单状态 = 订单取消（不计入结算与票数；与饿了么「已取消/全部退款」对称）
-   关联 dim：platform = '美团'，platform_shop_id / shop_short_name 对齐导出门店
-   默认 dim_store(..., meituan_enterprise_rebate)
-        dim_store_o2o(store_id, platform, platform_shop_id, shop_short_name)
+   美团：锚点 = 商品明细（下单时间落在业务日 D）；结算 = 财务订单明细全窗口匹配
+   财务窗口：dt >= D-120 天，避免跨日/延后出账漏匹配；未匹配订单不计入应收与企客，计入待匹配
    --------------------------------------------------------------------------- */
-mt_fin_dedup AS (
+mt_fin_global AS (
   SELECT DISTINCT ON (NULLIF(TRIM(REPLACE(m."基础信息_订单号", E'\t', '')), ''))
     NULLIF(TRIM(REPLACE(m."基础信息_订单号", E'\t', '')), '') AS order_no,
     NULLIF(TRIM(REPLACE(m."基础信息_门店id", E'\t', '')), '') AS platform_shop_id,
@@ -56,35 +50,87 @@ mt_fin_dedup AS (
     NULLIF(TRIM(REPLACE(m."商家应收款", E'\t', '')), '')::numeric AS settlement_amt
   FROM ods_rpa_meituan_fin_order m
   CROSS JOIN params p
-  WHERE m.dt::text = to_char(p.d, 'YYYY-MM-DD')
+  WHERE m.dt::date >= p.d - 120
     AND NULLIF(TRIM(REPLACE(m."基础信息_订单状态", E'\t', '')), '') IS DISTINCT FROM '订单取消'
-    AND NULLIF(TRIM(REPLACE(m."基础信息_下单时间", E'\t', '')), '') IS NOT NULL
-    AND TRIM(REPLACE(m."基础信息_下单时间", E'\t', '')) >= to_char(p.d, 'YYYY-MM-DD')
-    AND TRIM(REPLACE(m."基础信息_下单时间", E'\t', '')) < to_char(p.d_end, 'YYYY-MM-DD')
   ORDER BY NULLIF(TRIM(REPLACE(m."基础信息_订单号", E'\t', '')), ''),
     NULLIF(TRIM(REPLACE(m."基础信息_账单日期", E'\t', '')), '') DESC NULLS LAST
 ),
 
-mt_by_store AS (
+mt_anchor AS (
+  SELECT DISTINCT ON (NULLIF(TRIM(REPLACE(pd."订单编号", E'\t', '')), ''))
+    NULLIF(TRIM(REPLACE(pd."订单编号", E'\t', '')), '') AS order_no,
+    NULLIF(TRIM(REPLACE(pd."商家ID", E'\t', '')), '') AS platform_shop_id,
+    NULLIF(TRIM(REPLACE(pd."商家名称", E'\t', '')), '') AS platform_shop_name
+  FROM ods_rpa_meituan_product_detail pd
+  CROSS JOIN params p
+  WHERE NULLIF(TRIM(REPLACE(pd."订单状态", E'\t', '')), '') IS DISTINCT FROM '已取消'
+    AND NULLIF(TRIM(REPLACE(pd."下单时间", E'\t', '')), '') IS NOT NULL
+    AND TRIM(REPLACE(pd."下单时间", E'\t', '')) >= to_char(p.d, 'YYYY-MM-DD')
+    AND TRIM(REPLACE(pd."下单时间", E'\t', '')) < to_char(p.d_end, 'YYYY-MM-DD')
+  ORDER BY NULLIF(TRIM(REPLACE(pd."订单编号", E'\t', '')), ''),
+    NULLIF(TRIM(REPLACE(pd."订单完成时间", E'\t', '')), '') DESC NULLS LAST
+),
+
+mt_matched AS (
   SELECT
-    COALESCE(ds.store_short_name, mf.platform_shop_name) AS store_label,
+    a.order_no,
+    a.platform_shop_id,
+    a.platform_shop_name,
+    f.settlement_amt
+  FROM mt_anchor a
+  INNER JOIN mt_fin_global f ON f.order_no = a.order_no
+),
+
+mt_pending_rows AS (
+  SELECT
+    a.order_no,
+    a.platform_shop_id,
+    a.platform_shop_name
+  FROM mt_anchor a
+  LEFT JOIN mt_fin_global f ON f.order_no = a.order_no
+  WHERE f.order_no IS NULL
+),
+
+mt_settled_by_store AS (
+  SELECT
+    COALESCE(ds.store_short_name, mm.platform_shop_name) AS store_label,
     COALESCE(ds.province, '') AS province,
     COALESCE(ds.city, '')     AS city,
     COALESCE(ds.store_nature::text, '未匹配') AS store_type,
     COUNT(*)::bigint AS mt_order_cnt,
-    COALESCE(SUM(mf.settlement_amt), 0) AS mt_receivable_amt,
+    COALESCE(SUM(mm.settlement_amt), 0) AS mt_receivable_amt,
     (COUNT(*)::numeric * COALESCE(MAX(ds.meituan_enterprise_rebate), 0::numeric)) AS mt_qike_rebate_amt,
-    COALESCE(SUM(mf.settlement_amt), 0)
+    COALESCE(SUM(mm.settlement_amt), 0)
       + (COUNT(*)::numeric * COALESCE(MAX(ds.meituan_enterprise_rebate), 0::numeric)) AS mt_receipt_amt,
     COALESCE(MAX(ds.meituan_enterprise_rebate), 0::numeric) AS mt_qike_rebate_per_order
-  FROM mt_fin_dedup mf
+  FROM mt_matched mm
   LEFT JOIN dim_store_o2o o2o
     ON o2o.platform = '美团买药'
    AND (
-     o2o.platform_store_id::text = mf.platform_shop_id
-     OR o2o.store_name = mf.platform_shop_name
+     o2o.platform_store_id::text = mm.platform_shop_id
+     OR o2o.store_name = mm.platform_shop_name
      OR REPLACE(REPLACE(o2o.store_name, '（', '('), '）', ')')
-      = REPLACE(REPLACE(mf.platform_shop_name, '（', '('), '）', ')')
+      = REPLACE(REPLACE(mm.platform_shop_name, '（', '('), '）', ')')
+   )
+  LEFT JOIN dim_store ds ON ds.store_short_name = o2o.store_short_name
+  GROUP BY 1, 2, 3, 4
+),
+
+mt_pending_by_store AS (
+  SELECT
+    COALESCE(ds.store_short_name, pr.platform_shop_name) AS store_label,
+    COALESCE(ds.province, '') AS province,
+    COALESCE(ds.city, '')     AS city,
+    COALESCE(ds.store_nature::text, '未匹配') AS store_type,
+    COUNT(*)::bigint AS mt_pending_fin_cnt
+  FROM mt_pending_rows pr
+  LEFT JOIN dim_store_o2o o2o
+    ON o2o.platform = '美团买药'
+   AND (
+     o2o.platform_store_id::text = pr.platform_shop_id
+     OR o2o.store_name = pr.platform_shop_name
+     OR REPLACE(REPLACE(o2o.store_name, '（', '('), '）', ')')
+      = REPLACE(REPLACE(pr.platform_shop_name, '（', '('), '）', ')')
    )
   LEFT JOIN dim_store ds ON ds.store_short_name = o2o.store_short_name
   GROUP BY 1, 2, 3, 4
@@ -92,29 +138,66 @@ mt_by_store AS (
 
 mt_by_store_one AS (
   SELECT
-    store_label,
-    MAX(province)   AS province,
-    MAX(city)       AS city,
-    MAX(store_type) AS store_type,
-    SUM(mt_order_cnt) AS mt_order_cnt,
-    SUM(mt_receivable_amt) AS mt_receivable_amt,
-    SUM(mt_qike_rebate_amt) AS mt_qike_rebate_amt,
-    SUM(mt_receipt_amt) AS mt_receipt_amt,
-    MAX(mt_qike_rebate_per_order) AS mt_qike_rebate_per_order
-  FROM mt_by_store
-  GROUP BY store_label
+    COALESCE(s.store_label, p.store_label) AS store_label,
+    COALESCE(NULLIF(s.province, ''), p.province, '') AS province,
+    COALESCE(NULLIF(s.city, ''), p.city, '') AS city,
+    COALESCE(s.store_type, p.store_type, '未匹配') AS store_type,
+    COALESCE(s.mt_order_cnt, 0) AS mt_order_cnt,
+    COALESCE(s.mt_receivable_amt, 0) AS mt_receivable_amt,
+    COALESCE(s.mt_qike_rebate_amt, 0) AS mt_qike_rebate_amt,
+    COALESCE(s.mt_receipt_amt, 0) AS mt_receipt_amt,
+    COALESCE(s.mt_qike_rebate_per_order, 0) AS mt_qike_rebate_per_order,
+    COALESCE(p.mt_pending_fin_cnt, 0) AS mt_pending_fin_cnt
+  FROM (
+    SELECT
+      store_label,
+      MAX(province)   AS province,
+      MAX(city)       AS city,
+      MAX(store_type) AS store_type,
+      SUM(mt_order_cnt) AS mt_order_cnt,
+      SUM(mt_receivable_amt) AS mt_receivable_amt,
+      SUM(mt_qike_rebate_amt) AS mt_qike_rebate_amt,
+      SUM(mt_receipt_amt) AS mt_receipt_amt,
+      MAX(mt_qike_rebate_per_order) AS mt_qike_rebate_per_order
+    FROM mt_settled_by_store
+    GROUP BY store_label
+  ) s
+  FULL OUTER JOIN (
+    SELECT
+      store_label,
+      MAX(province)   AS province,
+      MAX(city)       AS city,
+      MAX(store_type) AS store_type,
+      SUM(mt_pending_fin_cnt) AS mt_pending_fin_cnt
+    FROM mt_pending_by_store
+    GROUP BY store_label
+  ) p ON s.store_label = p.store_label
 ),
 
 /* ---------------------------------------------------------------------------
-   饿了么：订单导出；结算字段可改为 ods_rpa_eleme_fin_sales_detail（多主体合并后）
-   剔除：已取消、全部退款（导出里「商户应收金额」可能仍为正值，不能参与结算/票数）
+   饿了么：锚点 = 订单导出；结算金额 = 财务「订单应收」在窗内 **按订单号 SUM(订单应收_col_13)**。
+   同一订单可能多行（如正向+冲减），不能只取 DISTINCT ON 一行，否则会与订单导出商户应收不一致。
    --------------------------------------------------------------------------- */
-ele_dedup AS (
+ele_fin_global AS (
+  SELECT
+    NULLIF(TRIM(REPLACE(f."订单号_col_6", E'\t', '')), '') AS order_no,
+    SUM(
+      CASE WHEN BTRIM(REPLACE(f."订单应收_col_13", E'\t', '')) ~ '^-?[0-9]+(\.[0-9]*)?$'
+           THEN BTRIM(REPLACE(f."订单应收_col_13", E'\t', ''))::numeric
+           ELSE 0::numeric END
+    ) AS settlement_amt
+  FROM ods_rpa_eleme_fin_sales_detail f
+  CROSS JOIN params p
+  WHERE f.dt::date >= p.d - 120
+    AND NULLIF(TRIM(REPLACE(f."订单号_col_6", E'\t', '')), '') IS NOT NULL
+  GROUP BY 1
+),
+
+ele_anchor AS (
   SELECT DISTINCT ON (NULLIF(TRIM(REPLACE(e."订单编号", E'\t', '')), ''))
     NULLIF(TRIM(REPLACE(e."订单编号", E'\t', '')), '') AS order_no,
     NULLIF(TRIM(REPLACE(e."门店ID", E'\t', '')), '') AS platform_shop_id,
-    NULLIF(TRIM(REPLACE(e."商户名称", E'\t', '')), '') AS platform_shop_name,
-    NULLIF(TRIM(REPLACE(e."商户应收金额", E'\t', '')), '')::numeric AS settlement_amt
+    NULLIF(TRIM(REPLACE(e."商户名称", E'\t', '')), '') AS platform_shop_name
   FROM ods_rpa_eleme_order e
   CROSS JOIN params p
   WHERE e.dt::text = to_char(p.d, 'YYYY-MM-DD')
@@ -135,22 +218,62 @@ ele_dedup AS (
   ORDER BY NULLIF(TRIM(REPLACE(e."订单编号", E'\t', '')), ''), e."订单序号"
 ),
 
-ele_by_store AS (
+ele_matched AS (
   SELECT
-    COALESCE(ds.store_short_name, ed.platform_shop_name) AS store_label,
+    a.order_no,
+    a.platform_shop_id,
+    a.platform_shop_name,
+    g.settlement_amt
+  FROM ele_anchor a
+  INNER JOIN ele_fin_global g ON g.order_no = a.order_no
+),
+
+ele_pending_rows AS (
+  SELECT
+    a.order_no,
+    a.platform_shop_id,
+    a.platform_shop_name
+  FROM ele_anchor a
+  LEFT JOIN ele_fin_global g ON g.order_no = a.order_no
+  WHERE g.order_no IS NULL
+),
+
+ele_settled_by_store AS (
+  SELECT
+    COALESCE(ds.store_short_name, em.platform_shop_name) AS store_label,
     COALESCE(ds.province, '') AS province,
     COALESCE(ds.city, '')     AS city,
     COALESCE(ds.store_nature::text, '未匹配') AS store_type,
     COUNT(*)::bigint AS ele_order_cnt,
-    COALESCE(SUM(ed.settlement_amt), 0) AS ele_settlement_amt
-  FROM ele_dedup ed
+    COALESCE(SUM(em.settlement_amt), 0) AS ele_settlement_amt
+  FROM ele_matched em
   LEFT JOIN dim_store_o2o o2o
     ON o2o.platform IN ('饿了么', '淘宝闪购')
    AND (
-     o2o.platform_store_id::text = ed.platform_shop_id
-     OR o2o.store_name = ed.platform_shop_name
+     o2o.platform_store_id::text = em.platform_shop_id
+     OR o2o.store_name = em.platform_shop_name
      OR REPLACE(REPLACE(o2o.store_name, '（', '('), '）', ')')
-      = REPLACE(REPLACE(ed.platform_shop_name, '（', '('), '）', ')')
+      = REPLACE(REPLACE(em.platform_shop_name, '（', '('), '）', ')')
+   )
+  LEFT JOIN dim_store ds ON ds.store_short_name = o2o.store_short_name
+  GROUP BY 1, 2, 3, 4
+),
+
+ele_pending_by_store AS (
+  SELECT
+    COALESCE(ds.store_short_name, pr.platform_shop_name) AS store_label,
+    COALESCE(ds.province, '') AS province,
+    COALESCE(ds.city, '')     AS city,
+    COALESCE(ds.store_nature::text, '未匹配') AS store_type,
+    COUNT(*)::bigint AS ele_pending_fin_cnt
+  FROM ele_pending_rows pr
+  LEFT JOIN dim_store_o2o o2o
+    ON o2o.platform IN ('饿了么', '淘宝闪购')
+   AND (
+     o2o.platform_store_id::text = pr.platform_shop_id
+     OR o2o.store_name = pr.platform_shop_name
+     OR REPLACE(REPLACE(o2o.store_name, '（', '('), '）', ')')
+      = REPLACE(REPLACE(pr.platform_shop_name, '（', '('), '）', ')')
    )
   LEFT JOIN dim_store ds ON ds.store_short_name = o2o.store_short_name
   GROUP BY 1, 2, 3, 4
@@ -158,37 +281,56 @@ ele_by_store AS (
 
 ele_by_store_one AS (
   SELECT
-    store_label,
-    MAX(province)   AS province,
-    MAX(city)       AS city,
-    MAX(store_type) AS store_type,
-    SUM(ele_order_cnt) AS ele_order_cnt,
-    SUM(ele_settlement_amt) AS ele_settlement_amt
-  FROM ele_by_store
-  GROUP BY store_label
+    COALESCE(s.store_label, p.store_label) AS store_label,
+    COALESCE(NULLIF(s.province, ''), p.province, '') AS province,
+    COALESCE(NULLIF(s.city, ''), p.city, '') AS city,
+    COALESCE(s.store_type, p.store_type, '未匹配') AS store_type,
+    COALESCE(s.ele_order_cnt, 0) AS ele_order_cnt,
+    COALESCE(s.ele_settlement_amt, 0) AS ele_settlement_amt,
+    COALESCE(p.ele_pending_fin_cnt, 0) AS ele_pending_fin_cnt
+  FROM (
+    SELECT
+      store_label,
+      MAX(province)   AS province,
+      MAX(city)       AS city,
+      MAX(store_type) AS store_type,
+      SUM(ele_order_cnt) AS ele_order_cnt,
+      SUM(ele_settlement_amt) AS ele_settlement_amt
+    FROM ele_settled_by_store
+    GROUP BY store_label
+  ) s
+  FULL OUTER JOIN (
+    SELECT
+      store_label,
+      MAX(province)   AS province,
+      MAX(city)       AS city,
+      MAX(store_type) AS store_type,
+      SUM(ele_pending_fin_cnt) AS ele_pending_fin_cnt
+    FROM ele_pending_by_store
+    GROUP BY store_label
+  ) p ON s.store_label = p.store_label
 ),
 
 /* ---------------------------------------------------------------------------
-   京东：财务 ods_rpa_jd_finance 按「到家业务单号」汇总结算金额（与订单表「订单编号」一致）。
-   说明：RPA 落表时「秒送单号」常为空，不能用作关联键；到家业务单号 = 前台订单号。
-   时间：无「下单时间」时用成交时间 → 门店收单时间
+   京东：锚点 = 订单（分区日 D + 成交时间窗）；财务 = 全窗口按到家业务单号汇总
    --------------------------------------------------------------------------- */
-jd_settlement AS (
+jd_fin_global AS (
   SELECT
     NULLIF(TRIM(REPLACE(jf."到家业务单号", E'\t', '')), '') AS order_no,
     SUM(NULLIF(TRIM(REPLACE(jf."结算金额", E'\t', '')), '')::numeric) AS settlement_amt
   FROM ods_rpa_jd_finance jf
   CROSS JOIN params p
-  WHERE jf.dt::text = to_char(p.d, 'YYYY-MM-DD')
+  WHERE jf.dt::date >= p.d - 120
   GROUP BY 1
   HAVING NULLIF(TRIM(REPLACE(jf."到家业务单号", E'\t', '')), '') IS NOT NULL
 ),
 
-jd_orders AS (
+jd_orders_base AS (
   SELECT DISTINCT ON (NULLIF(TRIM(REPLACE(jo."订单编号", E'\t', '')), ''))
     NULLIF(TRIM(REPLACE(jo."订单编号", E'\t', '')), '') AS order_no,
     NULLIF(TRIM(REPLACE(jo."门店ID", E'\t', '')), '') AS platform_shop_id,
     NULLIF(TRIM(REPLACE(jo."门店名称", E'\t', '')), '') AS platform_shop_name,
+    NULLIF(TRIM(REPLACE(jo."订单状态", E'\t', '')), '') AS order_status,
     COALESCE(
       NULLIF(TRIM(REPLACE(jo."成交时间", E'\t', '')), ''),
       NULLIF(TRIM(REPLACE(jo."门店收单时间", E'\t', '')), '')
@@ -199,37 +341,76 @@ jd_orders AS (
   ORDER BY NULLIF(TRIM(REPLACE(jo."订单编号", E'\t', '')), '')
 ),
 
-jd_joined AS (
+jd_anchor AS (
   SELECT
-    o.order_no,
-    o.platform_shop_id,
-    o.platform_shop_name,
-    js.settlement_amt,
-    o.place_time_raw
-  FROM jd_orders o
-  JOIN jd_settlement js ON js.order_no = o.order_no
+    b.order_no,
+    b.platform_shop_id,
+    b.platform_shop_name,
+    b.place_time_raw
+  FROM jd_orders_base b
   CROSS JOIN params p
-  WHERE o.place_time_raw IS NOT NULL
-    AND to_timestamp(o.place_time_raw, 'YYYY-MM-DD HH24:MI:SS') >= p.d::timestamptz
-    AND to_timestamp(o.place_time_raw, 'YYYY-MM-DD HH24:MI:SS') < p.d_end::timestamptz
+  WHERE b.place_time_raw IS NOT NULL
+    AND b.order_status IS DISTINCT FROM '已取消'
+    AND to_timestamp(b.place_time_raw, 'YYYY-MM-DD HH24:MI:SS') >= p.d::timestamptz
+    AND to_timestamp(b.place_time_raw, 'YYYY-MM-DD HH24:MI:SS') < p.d_end::timestamptz
 ),
 
-jd_by_store AS (
+jd_matched AS (
   SELECT
-    COALESCE(ds.store_short_name, jj.platform_shop_name) AS store_label,
+    a.order_no,
+    a.platform_shop_id,
+    a.platform_shop_name,
+    g.settlement_amt
+  FROM jd_anchor a
+  INNER JOIN jd_fin_global g ON g.order_no = a.order_no
+),
+
+jd_pending_rows AS (
+  SELECT
+    a.order_no,
+    a.platform_shop_id,
+    a.platform_shop_name
+  FROM jd_anchor a
+  LEFT JOIN jd_fin_global g ON g.order_no = a.order_no
+  WHERE g.order_no IS NULL
+),
+
+jd_settled_by_store AS (
+  SELECT
+    COALESCE(ds.store_short_name, jm.platform_shop_name) AS store_label,
     COALESCE(ds.province, '') AS province,
     COALESCE(ds.city, '')     AS city,
     COALESCE(ds.store_nature::text, '未匹配') AS store_type,
     COUNT(*)::bigint AS jd_order_cnt,
-    COALESCE(SUM(jj.settlement_amt), 0) AS jd_settlement_amt
-  FROM jd_joined jj
+    COALESCE(SUM(jm.settlement_amt), 0) AS jd_settlement_amt
+  FROM jd_matched jm
   LEFT JOIN dim_store_o2o o2o
     ON o2o.platform IN ('京东买药', '京东小时达', '京东')
    AND (
-     o2o.platform_store_id::text = jj.platform_shop_id
-     OR o2o.store_name = jj.platform_shop_name
+     o2o.platform_store_id::text = jm.platform_shop_id
+     OR o2o.store_name = jm.platform_shop_name
      OR REPLACE(REPLACE(o2o.store_name, '（', '('), '）', ')')
-      = REPLACE(REPLACE(jj.platform_shop_name, '（', '('), '）', ')')
+      = REPLACE(REPLACE(jm.platform_shop_name, '（', '('), '）', ')')
+   )
+  LEFT JOIN dim_store ds ON ds.store_short_name = o2o.store_short_name
+  GROUP BY 1, 2, 3, 4
+),
+
+jd_pending_by_store AS (
+  SELECT
+    COALESCE(ds.store_short_name, pr.platform_shop_name) AS store_label,
+    COALESCE(ds.province, '') AS province,
+    COALESCE(ds.city, '')     AS city,
+    COALESCE(ds.store_nature::text, '未匹配') AS store_type,
+    COUNT(*)::bigint AS jd_pending_fin_cnt
+  FROM jd_pending_rows pr
+  LEFT JOIN dim_store_o2o o2o
+    ON o2o.platform IN ('京东买药', '京东小时达', '京东')
+   AND (
+     o2o.platform_store_id::text = pr.platform_shop_id
+     OR o2o.store_name = pr.platform_shop_name
+     OR REPLACE(REPLACE(o2o.store_name, '（', '('), '）', ')')
+      = REPLACE(REPLACE(pr.platform_shop_name, '（', '('), '）', ')')
    )
   LEFT JOIN dim_store ds ON ds.store_short_name = o2o.store_short_name
   GROUP BY 1, 2, 3, 4
@@ -237,17 +418,44 @@ jd_by_store AS (
 
 jd_by_store_one AS (
   SELECT
-    store_label,
-    MAX(province)   AS province,
-    MAX(city)       AS city,
-    MAX(store_type) AS store_type,
-    SUM(jd_order_cnt) AS jd_order_cnt,
-    SUM(jd_settlement_amt) AS jd_settlement_amt
-  FROM jd_by_store
-  GROUP BY store_label
+    COALESCE(s.store_label, p.store_label) AS store_label,
+    COALESCE(NULLIF(s.province, ''), p.province, '') AS province,
+    COALESCE(NULLIF(s.city, ''), p.city, '') AS city,
+    COALESCE(s.store_type, p.store_type, '未匹配') AS store_type,
+    COALESCE(s.jd_order_cnt, 0) AS jd_order_cnt,
+    COALESCE(s.jd_settlement_amt, 0) AS jd_settlement_amt,
+    COALESCE(p.jd_pending_fin_cnt, 0) AS jd_pending_fin_cnt
+  FROM (
+    SELECT
+      store_label,
+      MAX(province)   AS province,
+      MAX(city)       AS city,
+      MAX(store_type) AS store_type,
+      SUM(jd_order_cnt) AS jd_order_cnt,
+      SUM(jd_settlement_amt) AS jd_settlement_amt
+    FROM jd_settled_by_store
+    GROUP BY store_label
+  ) s
+  FULL OUTER JOIN (
+    SELECT
+      store_label,
+      MAX(province)   AS province,
+      MAX(city)       AS city,
+      MAX(store_type) AS store_type,
+      SUM(jd_pending_fin_cnt) AS jd_pending_fin_cnt
+    FROM jd_pending_by_store
+    GROUP BY store_label
+  ) p ON s.store_label = p.store_label
 ),
 
-/* 三平台按门店主键对齐：一行一店，分列美团/饿了么/京东；全渠道结算含「美团实收+企客」 */
+pending_global_totals AS (
+  SELECT
+    (SELECT COUNT(*)::bigint FROM mt_pending_rows)  AS mt_pending_fin_match_total,
+    (SELECT COUNT(*)::bigint FROM ele_pending_rows) AS ele_pending_fin_match_total,
+    (SELECT COUNT(*)::bigint FROM jd_pending_rows)  AS jd_pending_fin_match_total
+),
+
+/* 三平台按门店主键对齐：一行一店；order_cnt = 已匹配 + 待匹配（用于麦芽田等按票分摊） */
 order_store_spine AS (
   SELECT store_label FROM mt_by_store_one
   UNION
@@ -262,16 +470,21 @@ orders_by_store AS (
     COALESCE(mt.province, el.province, jd.province, '') AS province,
     COALESCE(mt.city, el.city, jd.city, '')             AS city,
     COALESCE(mt.store_type, el.store_type, jd.store_type, '未匹配') AS store_type,
-    COALESCE(mt.mt_order_cnt, 0) + COALESCE(el.ele_order_cnt, 0) + COALESCE(jd.jd_order_cnt, 0) AS order_cnt,
+    COALESCE(mt.mt_order_cnt, 0) + COALESCE(mt.mt_pending_fin_cnt, 0)
+      + COALESCE(el.ele_order_cnt, 0) + COALESCE(el.ele_pending_fin_cnt, 0)
+      + COALESCE(jd.jd_order_cnt, 0) + COALESCE(jd.jd_pending_fin_cnt, 0) AS order_cnt,
     COALESCE(mt.mt_receipt_amt, 0) + COALESCE(el.ele_settlement_amt, 0) + COALESCE(jd.jd_settlement_amt, 0) AS settlement_amt,
     COALESCE(mt.mt_order_cnt, 0)       AS mt_order_cnt,
+    COALESCE(mt.mt_pending_fin_cnt, 0) AS mt_pending_fin_cnt,
     COALESCE(mt.mt_receivable_amt, 0)  AS mt_receivable_amt,
     COALESCE(mt.mt_qike_rebate_amt, 0) AS mt_qike_rebate_amt,
     COALESCE(mt.mt_receipt_amt, 0)     AS mt_receipt_amt,
     COALESCE(mt.mt_qike_rebate_per_order, 0) AS mt_qike_rebate_per_order,
     COALESCE(el.ele_order_cnt, 0)      AS ele_order_cnt,
+    COALESCE(el.ele_pending_fin_cnt, 0) AS ele_pending_fin_cnt,
     COALESCE(el.ele_settlement_amt, 0) AS ele_settlement_amt,
     COALESCE(jd.jd_order_cnt, 0)      AS jd_order_cnt,
+    COALESCE(jd.jd_pending_fin_cnt, 0) AS jd_pending_fin_cnt,
     COALESCE(jd.jd_settlement_amt, 0) AS jd_settlement_amt
   FROM order_store_spine s
   LEFT JOIN mt_by_store_one mt ON mt.store_label = s.store_label
@@ -377,17 +590,24 @@ SELECT
   COALESCE(fe.store_type, ob.store_type, '未匹配') AS store_type,
   s.store_label,
 
-  /* 全渠道结算：美团侧为「商家应收 + 企客返利」，饿了么/京东为导出结算字段 */
+  /* 全渠道结算：美团侧为「已匹配财务的商家应收 + 企客」；饿了么/京东为已匹配财务结算 */
   COALESCE(ob.settlement_amt, 0)  AS settlement_amt,
   COALESCE(ob.mt_order_cnt, 0)       AS mt_order_cnt,
+  COALESCE(ob.mt_pending_fin_cnt, 0) AS mt_pending_fin_cnt,
   COALESCE(ob.mt_receivable_amt, 0)  AS mt_receivable_amt,
   COALESCE(ob.mt_qike_rebate_amt, 0) AS mt_qike_rebate_amt,
   COALESCE(ob.mt_receipt_amt, 0)     AS mt_receipt_amt,
   COALESCE(ob.mt_qike_rebate_per_order, 0) AS mt_qike_rebate_per_order,
   COALESCE(ob.ele_order_cnt, 0)      AS ele_order_cnt,
+  COALESCE(ob.ele_pending_fin_cnt, 0) AS ele_pending_fin_cnt,
   COALESCE(ob.ele_settlement_amt, 0) AS ele_settlement_amt,
   COALESCE(ob.jd_order_cnt, 0)       AS jd_order_cnt,
+  COALESCE(ob.jd_pending_fin_cnt, 0) AS jd_pending_fin_cnt,
   COALESCE(ob.jd_settlement_amt, 0)  AS jd_settlement_amt,
+
+  pgt.mt_pending_fin_match_total,
+  pgt.ele_pending_fin_match_total,
+  pgt.jd_pending_fin_match_total,
 
   COALESCE(zh.zh_cost_total, 0)   AS zh_cost_total,
   COALESCE(fa.freight_alloc, 0)   AS freight_total_alloc,
@@ -402,6 +622,7 @@ SELECT
 
 FROM all_stores s
 CROSS JOIN params p
+CROSS JOIN pending_global_totals pgt
 CROSS JOIN freight_day fd
 LEFT JOIN fixed_enriched fe ON fe.store_label = s.store_label
 LEFT JOIN orders_by_store ob ON ob.store_label = s.store_label
@@ -415,7 +636,8 @@ ORDER BY province, city, store_type, store_label;
 --
 -- SELECT report_date, province, city, store_type,
 --        SUM(settlement_amt), SUM(zh_cost_total), SUM(freight_total_alloc),
---        SUM(order_cnt), SUM(rent_util_labor_fixed), SUM(promo_spend)
+--        SUM(order_cnt), SUM(rent_util_labor_fixed), SUM(promo_spend),
+--        MAX(mt_pending_fin_match_total), MAX(ele_pending_fin_match_total), MAX(jd_pending_fin_match_total)
 -- FROM ( <将上面整段 WITH...SELECT 包成子查询> ) x
 -- GROUP BY 1, 2, 3, 4;
 -- -----------------------------------------------------------------------------
