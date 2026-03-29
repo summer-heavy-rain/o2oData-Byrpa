@@ -213,10 +213,9 @@ sources:
             target_table: "ods_rpa_meituan_fin_bill"
 
           - sheet: "订单明细"
-            header_row: 2
+            header_row: 1
             header_rows: 2
             merge_strategy: "group_sub"
-            skip_rows: [1]
             target_table: "ods_rpa_meituan_fin_order"
 
           - sheet: "处罚&赔付"

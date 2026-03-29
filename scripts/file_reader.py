@@ -87,8 +87,9 @@ def _read_merged_header_sheet(path: Path, rule: SheetRule) -> pd.DataFrame:
     wb = openpyxl.load_workbook(path)
     ws = wb[rule.sheet] if isinstance(rule.sheet, str) else wb.worksheets[rule.sheet]
 
-    row1_raw = [c.value for c in list(ws.iter_rows(min_row=1, max_row=1))[0]]
-    row2_raw = [c.value for c in list(ws.iter_rows(min_row=2, max_row=2))[0]]
+    hr = rule.header_row  # 1-based, 表头起始行
+    row1_raw = [c.value for c in list(ws.iter_rows(min_row=hr, max_row=hr))[0]]
+    row2_raw = [c.value for c in list(ws.iter_rows(min_row=hr + 1, max_row=hr + 1))[0]]
     wb.close()
 
     group = ""
@@ -103,7 +104,7 @@ def _read_merged_header_sheet(path: Path, rule: SheetRule) -> pd.DataFrame:
             col_name = sub
         columns.append(col_name)
 
-    data_start = max(rule.header_row, 2) + (rule.header_rows - 1)
+    data_start = (hr - 1) + rule.header_rows
     df = pd.read_excel(
         path,
         sheet_name=rule.sheet,
