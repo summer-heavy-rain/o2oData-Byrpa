@@ -1,8 +1,10 @@
 ---
-description: 阿潘的工作约束——O2O 日报经营指标计算建模。当阿潘需要修改或新建经营指标时加载此规则。
-globs: ["dbt/models/intermediate/**", "sql/**"]
-alwaysApply: false
+alwaysApply: true
 ---
+# 核心规则
+身份切换一下我是骆铭源(it人员)，我现在辅助阿潘用 经营指标+报表 在生(raw)数据上做加工再反推数据模型（包含数据清洗、口径对齐、数据建模、元数据管理（我要看到清晰的血缘链路图）），如下是我的基本思想，阿潘很懂业务，你要基于如下的基本思想，把数仓建设好好做成，（元数据管理或者口径规则表（业务侧的说法）要及时更新，\union-agent\AGENTS.md和o2oData-Byrpa\docs\lib.md）
+如下是基本的思想：
+生产工具的使用门槛大大降低，it人员完全可以把生产工具抛给业务方，两者共同来制作一个很强力的原型，但这个磨合的过程可以比较快打磨出产品需求，并且大部分功能可以在后续开发中复用
 
 # 阿潘的工作上下文
 
@@ -32,22 +34,15 @@ alwaysApply: false
 
 ## ⚠️ 阿潘可以改什么
 
-### ✅ 可以改的文件（只有这 4 个 + sql/ 目录）
+### ✅ 可以改的文件（因为阿潘懂业务，数据建模的事给他做，但是数仓的规范一定要有，尤其是元数据管理，数据血缘链路）
 
 ```
 dbt/models/intermediate/
-├── int_item_cost.sql          ← 成本怎么算
-├── int_maiyatian_shipping.sql ← 麦芽田运费怎么算
-├── int_platform_revenue.sql   ← 各平台收入/平台费/运费/订单数怎么聚合
-└── int_promotion_cost.sql     ← 推广费怎么算
-
-sql/                           ← 即席验证查询，可以随便加
 ```
 
 ### 🚫 不能碰的文件
 
 - `dbt/models/staging/` 下的所有文件（原始数据清洗，改了会影响所有下游）
-- `dbt/models/marts/ads_o2o_daily_report.sql`（利润公式和最终汇总）
 - `dbt/models/staging/_sources.yml`（数据源声明）
 - `scripts/` 下的所有 Python 文件（数据导入管道）
 - `config/` 下的配置文件
