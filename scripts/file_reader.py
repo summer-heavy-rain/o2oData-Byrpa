@@ -81,15 +81,21 @@ def _read_xlsx_multi(path: Path, rule: FileRule) -> list[tuple[str, pd.DataFrame
 
 
 def _read_merged_header_sheet(path: Path, rule: SheetRule) -> pd.DataFrame:
-    """处理合并表头（两行表头展平为 group_sub 格式）"""
+    """处理合并表头（两行表头展平为 group_sub 格式）
+    自动解析合并单元格：被 merge 遮蔽的表头文本会恢复为正确值，
+    避免不同文件列数不同时 col_{i} 绝对位置错位。
+    """
     import openpyxl
 
     wb = openpyxl.load_workbook(path)
     ws = wb[rule.sheet] if isinstance(rule.sheet, str) else wb.worksheets[rule.sheet]
 
-    hr = rule.header_row  # 1-based, 表头起始行
-    row1_raw = [c.value for c in list(ws.iter_rows(min_row=hr, max_row=hr))[0]]
-    row2_raw = [c.value for c in list(ws.iter_rows(min_row=hr + 1, max_row=hr + 1))[0]]
+    merged_lookup = _build_merged_lookup(ws)
+
+    hr = rule.header_row  # 1-based
+    max_col = ws.max_column
+    row1_raw = [_resolve_cell(ws, merged_lookup, hr, c + 1) for c in range(max_col)]
+    row2_raw = [_resolve_cell(ws, merged_lookup, hr + 1, c + 1) for c in range(max_col)]
     wb.close()
 
     group = ""
@@ -121,6 +127,26 @@ def _read_merged_header_sheet(path: Path, rule: SheetRule) -> pd.DataFrame:
 
     df.columns = _sanitize_columns(df.columns.tolist())
     return df.dropna(how="all")
+
+
+def _build_merged_lookup(ws) -> dict[tuple[int, int], object]:
+    """Pre-build (row, col) -> primary_cell_value for all merged ranges."""
+    lookup: dict[tuple[int, int], object] = {}
+    for mr in ws.merged_cells.ranges:
+        primary_val = ws.cell(mr.min_row, mr.min_col).value
+        for r in range(mr.min_row, mr.max_row + 1):
+            for c in range(mr.min_col, mr.max_col + 1):
+                if (r, c) != (mr.min_row, mr.min_col):
+                    lookup[(r, c)] = primary_val
+    return lookup
+
+
+def _resolve_cell(ws, merged_lookup: dict, row: int, col: int):
+    """Get effective cell value, resolving merged cells to their primary value."""
+    val = ws.cell(row, col).value
+    if val is not None:
+        return val
+    return merged_lookup.get((row, col))
 
 
 def _read_csv(path: Path, rule: FileRule) -> list[tuple[str, pd.DataFrame]]:

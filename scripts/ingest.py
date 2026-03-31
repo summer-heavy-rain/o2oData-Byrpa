@@ -13,6 +13,7 @@ import argparse
 import fnmatch
 import logging
 import os
+import re
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -107,6 +108,105 @@ def discover_files(source: SourceConfig, folder: Path) -> list[tuple[Path, FileR
     return results
 
 
+_COL_I_RE = re.compile(r"^col_(\d+)$")
+
+
+def _align_columns_across_files(
+    dfs: list[pd.DataFrame], table: str
+) -> list[pd.DataFrame]:
+    """
+    当多个 DataFrame 写入同一张 ODS 表但列数不同时，用命名列做锚点
+    重新对齐 col_i 列，消除因某个文件多/少列导致的全局错位。
+
+    思路：取列数最少的 DataFrame 作为参考（canonical），逐段比对：
+    两个相邻命名列之间的 col_i 数量不一致 → 多出的列标记为 _extra_*，
+    其余 col_i 按参考顺序重编号。
+    """
+    if len(dfs) <= 1:
+        return dfs
+
+    col_counts = [len(df.columns) for df in dfs]
+    if len(set(col_counts)) == 1:
+        return dfs
+
+    ref_idx = col_counts.index(min(col_counts))
+    ref_cols = dfs[ref_idx].columns.tolist()
+
+    ref_anchors = [
+        (i, c) for i, c in enumerate(ref_cols)
+        if not _COL_I_RE.match(c) and not c.startswith("_")
+    ]
+
+    result = []
+    for df_i, df in enumerate(dfs):
+        if df_i == ref_idx or list(df.columns) == ref_cols:
+            result.append(df)
+            continue
+
+        cur_cols = df.columns.tolist()
+        cur_anchors = [
+            (i, c) for i, c in enumerate(cur_cols)
+            if not _COL_I_RE.match(c) and not c.startswith("_")
+        ]
+
+        ref_anchor_names = [c for _, c in ref_anchors]
+        cur_anchor_names = [c for _, c in cur_anchors]
+        if ref_anchor_names != cur_anchor_names:
+            log.warning(
+                f"  [{table}] 命名列不匹配，跳过列对齐: "
+                f"ref={len(ref_anchor_names)} vs cur={len(cur_anchor_names)}"
+            )
+            result.append(df)
+            continue
+
+        col_rename: dict[str, str] = {}
+        extra_cols: list[int] = []
+
+        boundaries_ref = [0] + [pos for pos, _ in ref_anchors] + [len(ref_cols)]
+        boundaries_cur = [0] + [pos for pos, _ in cur_anchors] + [len(cur_cols)]
+
+        for seg in range(len(boundaries_ref) - 1):
+            r_start, r_end = boundaries_ref[seg], boundaries_ref[seg + 1]
+            c_start, c_end = boundaries_cur[seg], boundaries_cur[seg + 1]
+
+            r_unnamed = [
+                (j, ref_cols[j]) for j in range(r_start, r_end)
+                if _COL_I_RE.match(ref_cols[j])
+            ]
+            c_unnamed = [
+                (j, cur_cols[j]) for j in range(c_start, c_end)
+                if _COL_I_RE.match(cur_cols[j])
+            ]
+
+            if len(c_unnamed) == len(r_unnamed):
+                for (c_pos, c_name), (_, r_name) in zip(c_unnamed, r_unnamed):
+                    if c_name != r_name:
+                        col_rename[c_name] = r_name
+            elif len(c_unnamed) > len(r_unnamed):
+                n_extra = len(c_unnamed) - len(r_unnamed)
+                for k in range(n_extra):
+                    extra_pos = c_unnamed[k][0]
+                    extra_cols.append(extra_pos)
+                remaining = c_unnamed[n_extra:]
+                for (c_pos, c_name), (_, r_name) in zip(remaining, r_unnamed):
+                    if c_name != r_name:
+                        col_rename[c_name] = r_name
+
+        if extra_cols or col_rename:
+            extra_names = [cur_cols[p] for p in extra_cols]
+            log.info(
+                f"  [{table}] 列对齐: 移除多余列 {extra_names}, "
+                f"重映射 {len(col_rename)} 列"
+            )
+            df = df.drop(columns=extra_names, errors="ignore")
+            if col_rename:
+                df = df.rename(columns=col_rename)
+
+        result.append(df)
+
+    return result
+
+
 def process_source(source: SourceConfig, dt: date, manifest, *, discover_only: bool = False):
     """处理单个数据源的完整流程"""
     folder = manifest.resolve_path(source, dt)
@@ -151,6 +251,7 @@ def process_source(source: SourceConfig, dt: date, manifest, *, discover_only: b
         return all_results
 
     for table, dfs in all_results.items():
+        dfs = _align_columns_across_files(dfs, table)
         merged = pd.concat(dfs, ignore_index=True)
         upload_to_supabase(table, merged, dt)
 
