@@ -1,0 +1,616 @@
+# ============================================================
+# ODS 表结构定义（唯一权威来源 - Single Source of Truth）
+# 用途: scripts/sync_schema.py 读取此文件
+#       → 自动建表 / 加列 / 生成 dbt _sources.yml
+# 规则:
+#   - 普通 ODS 表: 业务列默认 TEXT，元数据列(dt/_source_file/_load_time)自动添加
+#   - 自定义表:    设 custom_ddl: true，手动指定每列的类型
+# 修改流程: 编辑此文件 → python -m scripts.sync_schema
+# ============================================================
+
+version: 1
+
+defaults:
+  schema: public
+  meta_columns:
+    - { name: dt, type: "DATE NOT NULL" }
+    - { name: _source_file, type: "TEXT NOT NULL" }
+    - { name: _load_time, type: "TIMESTAMPTZ NOT NULL DEFAULT NOW()" }
+
+tables:
+
+  # ================================================================
+  # 迷你橙
+  # ================================================================
+  ods_rpa_miniorange_order_detail:
+    description: "mini橙订单商品明细（直营+加盟，_store_type 区分）"
+    dbt_source: rpa_o2o
+    extra_meta: [_store_type]
+    columns:
+      - 渠道
+      - 门店编码
+      - 门店名称
+      - 渠道订单号
+      - 订单状态
+      - 一级分类
+      - 二级分类
+      - 商品编码
+      - 商品条码
+      - 商品名称
+      - 商品数量
+      - 出库数量
+      - 商品售价
+      - 时间
+      - 商家补贴
+      - 平台补贴
+      - 总成本
+      - 金额
+
+  # ================================================================
+  # 饿了么 - 订单
+  # ================================================================
+  ods_rpa_eleme_order:
+    description: "饿了么订单导出"
+    dbt_source: rpa_o2o
+    extra_meta: [_account_type]
+    columns:
+      - 订单序号
+      - 订单编号
+      - 订单来源
+      - 淘宝闪购订单编号
+      - 三方订单id
+      - 城市
+      - 商户名称
+      - 门店ID
+      - 淘宝闪购商家ID
+      - 配送方式
+      - 订单类型
+      - 订单状态
+      - 退款状态
+      - 退款时间
+      - 退款金额
+      - 订单无效理由
+      - 下单时间
+      - 预计送达时间
+      - 商户接单时间
+      - 订单完成时间
+      - 订单总金额
+      - 用户实付金额
+      - 商户应收金额
+      - 商家购物金
+      - 平台佣金
+      - 索赔状态
+      - 商品费用
+      - 商品名称
+      - 商品分类
+      - 商品ID
+      - upc
+      - 店内码_货号
+      - 商品售价
+      - 商品数量
+      - 商品优惠金额
+      - 商品原始总价
+      - 商品成交总价
+      - 商品退款金额
+      - 商品退款数量
+      - 商品退款总价
+      - 活动ID
+      - 活动名称
+      - 活动优惠
+      - 活动类型
+      - 订单优惠金额
+      - 配送费
+      - 打包费
+      - 打包袋费
+      - 顾客联系电话
+      - 收货地址
+      - 备注
+      - 订单取消原因
+      - 退款原因
+      - 骑手姓名
+      - 骑手电话
+      - 预计送达开始时间
+      - 预计送达结束时间
+      - 商家实收金额
+
+  # ================================================================
+  # 饿了么 - 推广
+  # ================================================================
+  ods_rpa_eleme_promotion:
+    description: "饿了么推广数据"
+    dbt_source: rpa_o2o
+    extra_meta: [_account_type]
+    columns:
+      - 日期
+      - 城市
+      - 省份
+      - 门店ID
+      - 门店名称
+      - 计划ID
+      - 计划名称
+      - 资金来源
+      - 计划归属
+      - 推广产品
+      - 推广消费_元
+      - 推广现金消费_元
+      - 曝光提升数
+      - 进店提升数
+      - 全站交易额_元
+      - 全站曝光量_次
+      - 全站进店量_次
+      - 全站订单量_单
+      - 推广费比
+      - 订单成本_元_单
+
+  # ================================================================
+  # 饿了么 - 财务（16 张 sheet）
+  # 列定义待发现，运行: python -m scripts.sync_schema --discover
+  # ================================================================
+  ods_rpa_eleme_fin_summary:
+    description: "饿了么财务-全部账单汇总"
+    dbt_source: rpa_o2o
+    extra_meta: [_account_type]
+    columns: []
+
+  ods_rpa_eleme_fin_sales_summary:
+    description: "饿了么财务-销售账单汇总"
+    dbt_source: rpa_o2o
+    extra_meta: [_account_type]
+    columns: []
+
+  ods_rpa_eleme_fin_sales_detail:
+    description: "饿了么财务-销售账单明细（合并表头展平）"
+    dbt_source: rpa_o2o
+    extra_meta: [_account_type]
+    columns: []
+
+  ods_rpa_eleme_fin_operation:
+    description: "饿了么财务-代运营账单"
+    dbt_source: rpa_o2o
+    extra_meta: [_account_type]
+    columns: []
+
+  ods_rpa_eleme_fin_cps:
+    description: "饿了么财务-CPS账单"
+    dbt_source: rpa_o2o
+    extra_meta: [_account_type]
+    columns: []
+
+  ods_rpa_eleme_fin_coupon_summary:
+    description: "饿了么财务-卡券汇总"
+    dbt_source: rpa_o2o
+    extra_meta: [_account_type]
+    columns: []
+
+  ods_rpa_eleme_fin_coupon_detail:
+    description: "饿了么财务-卡券明细"
+    dbt_source: rpa_o2o
+    extra_meta: [_account_type]
+    columns: []
+
+  ods_rpa_eleme_fin_incentive:
+    description: "饿了么财务-激励账单"
+    dbt_source: rpa_o2o
+    extra_meta: [_account_type]
+    columns: []
+
+  ods_rpa_eleme_fin_semi_summary:
+    description: "饿了么财务-半托管汇总"
+    dbt_source: rpa_o2o
+    extra_meta: [_account_type]
+    columns: []
+
+  ods_rpa_eleme_fin_semi_detail:
+    description: "饿了么财务-半托管明细（合并表头展平）"
+    dbt_source: rpa_o2o
+    extra_meta: [_account_type]
+    columns: []
+
+  ods_rpa_eleme_fin_semi_product:
+    description: "饿了么财务-半托管商品账单（合并表头展平）"
+    dbt_source: rpa_o2o
+    extra_meta: [_account_type]
+    columns: []
+
+  ods_rpa_eleme_fin_inquiry:
+    description: "饿了么财务-付费问诊"
+    dbt_source: rpa_o2o
+    extra_meta: [_account_type]
+    columns: []
+
+  ods_rpa_eleme_fin_channel_summary:
+    description: "饿了么财务-渠道费用汇总"
+    dbt_source: rpa_o2o
+    extra_meta: [_account_type]
+    columns: []
+
+  ods_rpa_eleme_fin_channel_detail:
+    description: "饿了么财务-渠道费用明细"
+    dbt_source: rpa_o2o
+    extra_meta: [_account_type]
+    columns: []
+
+  ods_rpa_eleme_fin_return_summary:
+    description: "饿了么财务-退货运费汇总"
+    dbt_source: rpa_o2o
+    extra_meta: [_account_type]
+    columns: []
+
+  ods_rpa_eleme_fin_return_detail:
+    description: "饿了么财务-退货运费明细（合并表头展平）"
+    dbt_source: rpa_o2o
+    extra_meta: [_account_type]
+    columns: []
+
+  # ================================================================
+  # 京东 - 订单
+  # ================================================================
+  ods_rpa_jd_order:
+    description: "京东小时达-订单查询"
+    dbt_source: rpa_o2o
+    columns:
+      - 订单小号
+      - 订单编号
+      - 预计送达结束时间
+      - 订单总金额
+      - 用户应付金额
+      - 门店应收金额
+      - 优惠金额
+      - 门店收单时间
+      - 妥投时间
+      - 门店ID
+      - 门店名称
+      - 订单取消原因
+      - 拣货完成时间
+      - 承运商
+      - 运单号
+      - 订单备注
+      - 京东到家sku
+      - 商家sku
+      - UPC
+      - 商品名称
+      - 商品数量
+      - 商品一级分类
+      - 商品二级分类
+      - 商品三级分类
+      - 商品价格
+      - IMEI
+      - 收货人姓名
+      - 成交时间
+      - 预计送达开始时间
+      - 订单状态
+      - 支付方式
+      - 商品优惠金额
+      - 运费优惠金额
+      - 拣货人
+      - 接单时间
+      - 是否是商家会员
+      - 订单类型
+      - 支付渠道
+      - 是否拼团订单
+      - 是否处方药订单
+      - 处方药来源
+      - 电子处方图片
+      - 患者姓名
+      - 患者性别
+      - 患者身份证号
+      - 联系方式_手机号
+      - 监护人姓名
+      - 监护人身份证号
+      - 患者现住址
+      - 当前体温
+      - 健康码截图url
+      - 核酸证明报告截图url
+      - 行程码截图url
+      - 用药人两周内旅居史及病症情况
+      - 接触过来自海外及其他高危地区的发热患者
+      - 不清楚
+      - 发热
+      - 咳嗽
+      - 胸闷
+      - 其他
+      - 来源单号
+      - 是否医保订单
+      - 处方单图片url
+      - 订单来源
+      - 咨果订单号
+      - 医保渠道支付单号
+      - 医保自付金额
+      - 个账支付金额
+      - 医保统筹支付金额
+      - 是否国家补贴
+      - 是否上门激活
+      - SN码
+      - 国补审核照片链接
+      - 国补审核结果
+      - IMEI_1
+      - IMEI_2
+      - 国补UPC码
+      - sn上传
+      - 撞库结果
+
+  # ================================================================
+  # 京东 - 账单
+  # ================================================================
+  ods_rpa_jd_finance:
+    description: "京东小时达-SKU对账单"
+    dbt_source: rpa_o2o
+    columns:
+      - 到家业务单号
+      - 业务类型
+      - 商家编号
+      - 门店编号
+      - skuId
+      - sku名称
+      - sku数量
+      - 商品售价
+      - 费用类型
+      - 结算金额
+      - 京东承担金额
+      - 商家承担金额
+      - 商家承担比例
+      - 优惠ID
+      - 优惠名称
+      - upc
+      - 下单时间
+      - 完成时间
+      - 账期时间
+      - 结算单id
+      - 钱包结算状态
+      - 钱包
+      - 秒送单号
+      - 秒送skuid
+      - 秒送sku名称
+      - 秒送upc
+
+  # ================================================================
+  # 麦芽田
+  # ================================================================
+  ods_rpa_maiyatian_delivery:
+    description: "麦芽田配送报表（按门店分文件）"
+    dbt_source: rpa_o2o
+    extra_meta: [_store_name]
+    columns:
+      - 流水号
+      - 来源平台
+      - 平台店铺
+      - 状态
+      - 原流水号
+      - 订单编号
+      - 是否预约
+      - 下单日期
+      - 期望送达
+      - 预计发货时间
+      - 完成时间
+      - 备注
+      - 收货人
+      - 收货人电话
+      - 地址
+      - 订单总金额
+      - 商家实收金额
+      - 配送门店
+      - 距离
+      - 配送平台
+      - 配送单号
+      - 骑手姓名
+      - 骑手电话
+      - 配送费
+      - 小费
+      - 总配送费
+      - 配送距离
+      - 配送状态
+      - 实际发货时间
+      - 用户实付配送金额
+
+  # ================================================================
+  # 美团 - 商品明细
+  # ================================================================
+  ods_rpa_meituan_product_detail:
+    description: "美团买药-商品明细CSV"
+    dbt_source: rpa_o2o
+    extra_meta: [_store_name]
+    columns:
+      - 订单编号
+      - 下单时间
+      - 订单完成时间
+      - 商家名称
+      - 商家ID
+      - 商家所在城市
+      - 订单支付类型
+      - 订单状态
+      - 订单配送状态
+      - 是否预订单
+      - 商品分类
+      - 商品名称
+      - UPC码
+      - 平台商品SKU码
+      - 店内码_货号
+      - 是否部分退款商品
+      - 是否活动订单
+      - 优惠活动
+      - 是否催单
+      - 接单时长_s
+      - 订单原价交易额_元
+      - 订单实付交易额_元
+      - 平台承担活动金额_元
+      - 商家承担活动金额_元
+      - 商品销售数量
+      - 商品原价交易额_元
+      - 商品实付交易额_元
+      - 商品总补贴金额_元
+      - 商品商家补贴金额_元
+      - 商品平台补贴金额_元
+      - 部分退款商品数量
+      - 部分退款商品金额_元
+      - 配送费_元
+      - 配送时长_min
+      - 打包袋费
+      - 回复状态
+      - 商家回复内容
+      - 订单取消原因_仅取消订单
+
+  # ================================================================
+  # 美团 - 账单明细
+  # ================================================================
+  ods_rpa_meituan_fin_bill:
+    description: "美团买药-账单明细"
+    dbt_source: rpa_o2o
+    extra_meta: [_store_name]
+    columns:
+      - 结算id
+      - 入账结算ID
+      - 门店id
+      - 门店名称
+      - 账单日期
+      - 账单金额
+      - 应开发票金额
+      - 结算状态
+      - 归属账期
+      - 结算日期
+
+  # ================================================================
+  # 美团 - 订单明细
+  # ================================================================
+  ods_rpa_meituan_fin_order:
+    description: "美团买药-订单明细（64列合并表头）"
+    dbt_source: rpa_o2o
+    extra_meta: [_store_name]
+    columns:
+      - 门店id
+      - 门店名称
+      - 物理城市
+      - 是否代理订单
+      - 是否医保订单
+      - 客户id
+      - 结算id
+      - 入账结算id
+      - 交易类型
+      - 交易描述
+      - 用户支付方式
+      - 订单序号
+      - 订单号
+      - 下单时间
+      - 完成时间
+      - 退款时间
+      - 订单状态
+      - 结算状态
+      - 账单日期
+      - 归属账期
+      - 应开佣金发票金额
+      - 应开配送发票金额
+      - 商家应收款
+      - 商品总价
+      - 用户支付配送费
+      - 餐盒费
+      - 打包袋
+      - 商品补贴
+      - 配送费补贴
+      - 打包袋补贴
+      - 商家活动总支出
+      - 公益捐款
+      - 美团商品补贴
+      - 美团配送费补贴
+      - 美团打包袋补贴
+      - 美团补贴总支出
+      - 代理商商品补贴
+      - 代理商配送费补贴
+      - 代理商打包袋补贴
+      - 代理商补贴总支出
+      - 佣金
+      - 佣金2
+      - 健康卡费用商家部分
+      - 企业版费率
+      - 企业版佣金
+      - 配送方式
+      - 配送服务费
+      - 配送费返利
+      - 基础价格
+      - 距离收费
+      - 时段收费
+      - 品类收费
+      - 重量收费
+      - 特殊日期收费
+      - 爆单加价
+      - 用户线上支付金额
+      - 用户医保报销金额
+      - 用户自付金额
+      - 统筹支付金额
+      - 商家代金券美团补贴
+      - 商家代金券商家补贴
+      - 商家代金券用户支付
+      - 商家代金券佣金比例
+      - 用户支付_医事服务费
+
+  # ================================================================
+  # 美团 - 处罚赔付
+  # ================================================================
+  ods_rpa_meituan_fin_penalty:
+    description: "美团买药-处罚与赔付"
+    dbt_source: rpa_o2o
+    extra_meta: [_store_name]
+    columns:
+      - 门店id
+      - 门店名称
+      - 物理城市
+      - 客户id
+      - 结算id
+      - 入账结算id
+      - 账单日期
+      - 归属账期
+      - 结算状态
+      - 处罚赔付类型
+      - 违规原因
+      - 订单号
+      - 违规单id
+      - 应开发票金额
+      - 商家应收款
+
+  # ================================================================
+  # 美团 - 健康卡
+  # ================================================================
+  ods_rpa_meituan_fin_health_card:
+    description: "美团买药-健康卡费用"
+    dbt_source: rpa_o2o
+    extra_meta: [_store_name]
+    columns:
+      - 商家ID
+      - 商家名称
+      - 交易类型
+      - 返现完成时间
+      - 返现订单号
+      - 订单商品实付总金额
+      - 可报销商品金额
+      - 不可报销商品金额
+      - 用户返现金额
+      - 健康卡费用商家部分
+
+  # ================================================================
+  # 美团 - 推广费（自定义类型，非全 TEXT）
+  # ================================================================
+  ods_rpa_meituan_promotion:
+    description: "美团推广费流水（日粒度×门店）"
+    dbt_source: rpa_o2o
+    custom_ddl: true
+    primary_key: [dt, store_id]
+    columns:
+      - { name: dt, type: "DATE NOT NULL" }
+      - { name: store_id, type: BIGINT }
+      - { name: store_name, type: TEXT }
+      - { name: store_type, type: TEXT }
+      - { name: amount, type: "NUMERIC(10,2)" }
+      - { name: _source_file, type: TEXT }
+      - { name: _load_time, type: "TIMESTAMPTZ DEFAULT NOW()" }
+
+  # ================================================================
+  # 维度表 - 门店参考
+  # ================================================================
+  dim_o2o_store_ref:
+    description: "O2O门店参考表（门店简称/省份/城市/日均房租人工）"
+    dbt_source: o2o_ref
+    custom_ddl: true
+    primary_key: [store_short_name]
+    columns:
+      - { name: store_short_name, type: TEXT }
+      - { name: province, type: TEXT }
+      - { name: city, type: TEXT }
+      - { name: daily_rent_labor, type: "NUMERIC(10,4)" }
