@@ -60,7 +60,7 @@ dbt/models/intermediate/
 |---------|--------------|---------|
 | 美团账单/美团收入 | `ods_rpa_meituan_fin_order` | 商家应收款、佣金、配送服务费、基础信息_订单号 |
 | 美团商品明细 | `ods_rpa_meituan_product_detail` | 订单编号、商品销售数量、订单实付交易额_元 |
-| 饿了么财务/饿了么收入 | `ods_rpa_eleme_fin_sales_detail` | 净营业额合计、平台交易技术服务费、订单号_col_6 |
+| 饿了么财务/饿了么收入 | `ods_rpa_eleme_fin_sales_detail` | 净营业额合计、平台交易技术服务费、订单号、结算金额、订单应收 |
 | 饿了么订单 | `ods_rpa_eleme_order` | 商户应收金额、订单编号、订单状态 |
 | 饿了么推广 | `ods_rpa_eleme_promotion` | 推广消费_元、门店名称、日期 |
 | 京东账单 | `ods_rpa_jd_finance` | 结算金额、到家业务单号、费用类型 |

@@ -251,11 +251,58 @@ def process_source(source: SourceConfig, dt: date, manifest, *, discover_only: b
         return all_results
 
     for table, dfs in all_results.items():
+        _check_col_count_drift(table, dfs, dt)
         dfs = _align_columns_across_files(dfs, table)
         merged = pd.concat(dfs, ignore_index=True)
         upload_to_supabase(table, merged, dt)
 
     return all_results
+
+
+def _check_col_count_drift(table: str, dfs: list[pd.DataFrame], dt: date):
+    """检测同一 ODS 表的多个文件是否列数不一致 + 对比参考指纹"""
+    import json
+
+    fingerprint_dir = Path(__file__).parent.parent / "config" / "fingerprints"
+    fingerprint_dir.mkdir(parents=True, exist_ok=True)
+    fp_path = fingerprint_dir / f"{table}.json"
+
+    counts = []
+    for df in dfs:
+        raw = df.attrs.get("_raw_col_count")
+        if raw is not None:
+            counts.append(raw)
+            df["_col_count"] = str(raw)
+
+    if not counts:
+        return
+
+    if len(set(counts)) > 1:
+        log.critical(
+            f"⚠ [{table}] 同批文件列数不一致！{counts} — "
+            f"可能存在平台表头变更，数据将错位。请人工确认后再入库。"
+        )
+
+    current_count = max(counts)
+
+    if fp_path.exists():
+        ref = json.loads(fp_path.read_text("utf-8"))
+        ref_count = ref.get("col_count", 0)
+        if ref_count and ref_count != current_count:
+            log.warning(
+                f"⚠ [{table}] 列数变化: 参考={ref_count}, 当前={current_count} "
+                f"(差 {current_count - ref_count} 列)。"
+                f"如果确认新列数正确，删除 {fp_path.name} 后重新运行以更新指纹。"
+            )
+            return
+
+    fp_data = {
+        "col_count": current_count,
+        "last_date": str(dt),
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+    fp_path.write_text(json.dumps(fp_data, ensure_ascii=False, indent=2), "utf-8")
+    log.info(f"  [{table}] 列数指纹已记录: {current_count} 列")
 
 
 def upload_to_supabase(table: str, df: pd.DataFrame, dt: date):

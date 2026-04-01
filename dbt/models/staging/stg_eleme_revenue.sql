@@ -12,20 +12,20 @@
 */
 
 SELECT
-    NULLIF(TRIM("账单日期_col_3"), '')::date AS dt,
-    '饿了么'                                  AS platform,
+    NULLIF(TRIM("账单日期"), '')::date AS dt,
+    '饿了么'                           AS platform,
     CASE
-        WHEN "门店名称_col_1" ~ '[（(].+?[）)]'
-        THEN regexp_replace("门店名称_col_1", '.*[（(](.+?)[）)].*', '\1')
-        ELSE "门店名称_col_1"
-    END                                       AS store_name,
-    "订单号_col_6"                            AS order_no,
-    (CASE WHEN BTRIM("订单应收_col_13") ~ '^-?[0-9]+(\.[0-9]*)?$'
-          THEN BTRIM("订单应收_col_13")::numeric ELSE NULL END) AS revenue,
+        WHEN "门店名称" ~ '[（(].+?[）)]'
+        THEN regexp_replace("门店名称", '.*[（(](.+?)[）)].*', '\1')
+        ELSE "门店名称"
+    END                                AS store_name,
+    "订单号"                           AS order_no,
+    (CASE WHEN BTRIM("订单应收") ~ '^-?[0-9]+(\.[0-9]*)?$'
+          THEN BTRIM("订单应收")::numeric ELSE NULL END) AS revenue,
     (CASE WHEN BTRIM("商家收入_净营业额合计_净营业额合计") ~ '^-?[0-9]+(\.[0-9]*)?$'
           THEN BTRIM("商家收入_净营业额合计_净营业额合计")::numeric ELSE NULL END) AS net_sales_total,
     NULLIF(TRIM("商家支出_服务费用合计_平台交易技术服务费"),        '')::numeric AS platform_fee_raw,
     NULLIF(TRIM("商家支出_服务费用合计_平台履约技术服务费"),        '')::numeric AS shipping_platform_raw,
     NULLIF(TRIM("商家支出_服务费用合计_物流网络配送费"),            '')::numeric AS shipping_logistics_raw
 FROM {{ source('rpa_o2o', 'ods_rpa_eleme_fin_sales_detail') }}
-WHERE NULLIF(TRIM("账单日期_col_3"), '') IS NOT NULL
+WHERE NULLIF(TRIM("账单日期"), '') IS NOT NULL

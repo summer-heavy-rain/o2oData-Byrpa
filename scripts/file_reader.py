@@ -48,7 +48,9 @@ def _read_xlsx_single(path: Path, rule: FileRule) -> list[tuple[str, pd.DataFram
         dtype=str,
         engine="openpyxl",
     )
+    raw_count = len(df.columns)
     df.columns = _sanitize_columns(df.columns.tolist())
+    attach_col_count(df, raw_count)
     return [(rule.target_table, df)]
 
 
@@ -71,7 +73,9 @@ def _read_xlsx_multi(path: Path, rule: FileRule) -> list[tuple[str, pd.DataFrame
                     dtype=str,
                     engine="openpyxl",
                 )
+            raw_count = len(df.columns)
             df.columns = _sanitize_columns(df.columns.tolist())
+            attach_col_count(df, raw_count)
             df = df.dropna(how="all")
             if not df.empty:
                 results.append((sheet_rule.target_table, df))
@@ -126,6 +130,7 @@ def _read_merged_header_sheet(path: Path, rule: SheetRule) -> pd.DataFrame:
         df.columns = columns + extra
 
     df.columns = _sanitize_columns(df.columns.tolist())
+    attach_col_count(df, max_col)
     return df.dropna(how="all")
 
 
@@ -158,7 +163,9 @@ def _read_csv(path: Path, rule: FileRule) -> list[tuple[str, pd.DataFrame]]:
                 header=rule.header_row - 1,
                 dtype=str,
             )
+            raw_count = len(df.columns)
             df.columns = _sanitize_columns(df.columns.tolist())
+            attach_col_count(df, raw_count)
             return [(rule.target_table, df)]
         except (UnicodeDecodeError, UnicodeError):
             continue
@@ -175,7 +182,9 @@ def _read_html_as_xlsx(path: Path, rule: FileRule) -> list[tuple[str, pd.DataFra
         raise ValueError(f"HTML 文件中未找到表格: {path}")
 
     df = tables[0].astype(str).replace("nan", pd.NA)
+    raw_count = len(df.columns)
     df.columns = _sanitize_columns(df.columns.tolist())
+    attach_col_count(df, raw_count)
     return [(rule.target_table, df)]
 
 
@@ -226,8 +235,16 @@ def _read_xml_as_xlsx(path: Path, rule: FileRule) -> list[tuple[str, pd.DataFram
         data.append(padded[:max_cols])
 
     df = pd.DataFrame(data, columns=headers, dtype=str)
+    raw_count = len(headers)
     df.columns = _sanitize_columns(df.columns.tolist())
+    attach_col_count(df, raw_count)
     return [(rule.target_table, df.dropna(how="all"))]
+
+
+def attach_col_count(df: pd.DataFrame, raw_col_count: int) -> pd.DataFrame:
+    """将源文件原始列数附加到 DataFrame 属性上（不加列，由 ingest 决定是否写入）"""
+    df.attrs["_raw_col_count"] = raw_col_count
+    return df
 
 
 def _sanitize_columns(columns: list) -> list[str]:
