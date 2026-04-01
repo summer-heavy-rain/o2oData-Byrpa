@@ -38,6 +38,8 @@ alwaysApply: true
 
 ```
 dbt/models/intermediate/
+dbt/models/marts/
+dbt/analyses/
 ```
 
 ### 🚫 不能碰的文件
@@ -52,7 +54,7 @@ dbt/models/intermediate/
 
 ### ✅ 可以新建文件
 
-阿潘可以在 `dbt/models/intermediate/` 下新建 `int_xxx.sql` 文件（比如新增一个指标），但新文件建好后需要通知骆铭源在最终报表里"接线"（加 JOIN）。
+阿潘可以在 `dbt/models/intermediate/` 下新建 `int_xxx.sql` 文件，在 `dbt/models/marts/` 下修改最终报表的 JOIN 和利润公式，在 `dbt/analyses/` 下新建或修改诊断校验查询。
 
 ## 数据源速查（阿潘说"美团的收入"时，AI 去查这些表）
 
@@ -93,7 +95,7 @@ dbt/models/intermediate/
 - **饿了么**：`ods_rpa_eleme_promotion` 的 `推广消费_元` 取绝对值求和
 - **京东**：暂无推广数据
 
-### 利润公式（不在阿潘的修改范围内）
+### 利润公式
 ```
 招商利润 = 收入 - 成本 - 平台费
 净利润 = 招商利润 - 房租人工
@@ -102,8 +104,8 @@ dbt/models/intermediate/
 
 ## AI 帮阿潘改代码的规则
 
-1. **只改 `dbt/models/intermediate/` 下的文件**，绝不碰 staging / marts / scripts
-2. 每个文件开头都有 `{{ config(materialized='view') }}`，不要删也不要改
+1. **可改 `dbt/models/intermediate/` + `dbt/models/marts/` + `dbt/analyses/`**，不碰 staging / scripts
+2. 每个文件开头都有 `{{ config(materialized='view') }}` 或 `{{ config(materialized='table') }}`，不要删也不要改
 3. 文件里的 `{{ source('rpa_o2o', '表名') }}` 和 `{{ ref('模型名') }}` 是 dbt 语法，不要换成直接写表名
 4. 改完后提醒阿潘执行验证：
    ```bash
