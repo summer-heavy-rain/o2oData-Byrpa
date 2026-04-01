@@ -1,8 +1,12 @@
 /*
-  ODS 贴源层建表宏
-  用法: dbt run-operation create_ods_tables
+  ⚠️ 已弃用 — DDL 统一由 config/table_schemas.yaml 管理
+  新建表/加列请编辑 config/table_schemas.yaml，然后运行:
+    python -m scripts.sync_schema
+
+  此文件保留作为历史参考，不再是表结构的权威来源。
+  ---------------------------------------------------------------
+  原用法: dbt run-operation create_ods_tables
   原则: 业务列全 TEXT，零转换；元数据列带类型
-  DDL 初始由 scripts/discover_schema.py 生成，后续在此手动维护
 */
 
 {% macro create_ods_tables() %}
