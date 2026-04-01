@@ -331,36 +331,17 @@ def upload_to_supabase(table: str, df: pd.DataFrame, dt: date):
             {"t": table},
         ).fetchone()
 
-        if has_table:
-            conn.execute(
-                sqlalchemy.text(f'DELETE FROM "{table}" WHERE dt = :dt'),
-                {"dt": str(dt)},
+        if not has_table:
+            raise RuntimeError(
+                f"表 '{table}' 不存在。请先运行:\n"
+                f"  python -m scripts.sync_schema\n"
+                f"如需添加新表，请在 config/table_schemas.yaml 中声明后再运行 sync_schema。"
             )
-            existing_cols = {
-                r[0]
-                for r in conn.execute(
-                    sqlalchemy.text(
-                        "SELECT column_name FROM information_schema.columns "
-                        "WHERE table_schema='public' AND table_name=:t"
-                    ),
-                    {"t": table},
-                ).fetchall()
-            }
-            for c in df.columns:
-                if c not in existing_cols:
-                    conn.execute(sqlalchemy.text(
-                        f'ALTER TABLE "{table}" ADD COLUMN "{c}" TEXT'
-                    ))
-        else:
-            cols_sql = ", ".join(
-                f'"{c}" TEXT' for c in df.columns
-            )
-            conn.execute(sqlalchemy.text(
-                f'CREATE TABLE "{table}" ({cols_sql})'
-            ))
-            conn.execute(sqlalchemy.text(
-                f'CREATE INDEX IF NOT EXISTS idx_{table}_dt ON "{table}" (dt)'
-            ))
+
+        conn.execute(
+            sqlalchemy.text(f'DELETE FROM "{table}" WHERE dt = :dt'),
+            {"dt": str(dt)},
+        )
 
     df.to_sql(
         table,
