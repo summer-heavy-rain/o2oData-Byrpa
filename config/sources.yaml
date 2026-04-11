@@ -21,6 +21,7 @@ sources:
   # 迷你橙 — txt 指定 2 个文件（目录下实际有 6 个，只读指定的）
   # ================================================================
   mini_orange:
+    enabled: false  # 已改用 API（union-agent），RPA 导出已停用
     display_name: "迷你橙"
     folder: "【数据组】mini橙数据导出"
     discovery_mode: "explicit"
@@ -42,8 +43,8 @@ sources:
           _store_type: "加盟"
 
   # ================================================================
-  # 饿了么 — 8 个文件: 订单×3 + 推广×2 + 财务×3
-  # 3 个账号后缀: (无后缀)=默认 / (善培臣) / (自营)
+  # 饿了么 — 订单×2 + 推广×1 + 财务×2
+  # 账号: 小猴 / 善培臣（从文件名最后一段 -xxx.xlsx 提取）
   # 账号类型从文件名自动提取，写入 _account_type 列
   # ================================================================
   eleme:
@@ -51,8 +52,8 @@ sources:
     folder: "【数据组】饿了么数据导出"
     discovery_mode: "all"
     account_type_extract:
-      pattern: "\\((.+?)\\)"
-      default: "默认"
+      pattern: "-([^-]+)\\.xlsx$"
+      default: "未知"
     file_rules:
       # --- 订单 ---
       - match: "饿了么-订单*.xlsx"
@@ -148,7 +149,8 @@ sources:
           - "账单字段说明"
 
   # ================================================================
-  # 京东 — 2 个文件，注意格式陷阱
+  # 京东 — 3 个文件: 订单(买药)×1 + 账单(到家)×1 + 账单(买药)×1
+  # 文件名前缀 "小猴京东-"，用 fnmatch 通配
   # ================================================================
   jd:
     display_name: "京东"
@@ -157,16 +159,25 @@ sources:
     skip_non_data_files:
       - "warn.docx"
     file_rules:
-      - match: "订单查询.xlsx"
+      # --- 订单查询（买药，HTML 伪装 xlsx）---
+      - match: "*京东-订单查询*.xlsx"
         format: "html_as_xlsx"
         encoding: "utf-8"
         target_table: "ods_rpa_jd_order"
 
-      - match: "账单下载.xlsx"
+      # --- SKU 对账单（买药/小时达）---
+      - match: "*京东-账单下载-买药.xlsx"
         format: "xlsx"
         sheet: "sku对账单下载"
         header_row: 1
         target_table: "ods_rpa_jd_finance"
+
+      # --- 商家对账单（到家，宽表）---
+      - match: "*京东-账单下载-到家.xlsx"
+        format: "xlsx"
+        sheet: 0
+        header_row: 1
+        target_table: "ods_rpa_jd_daojia_finance"
 
   # ================================================================
   # 麦芽田 — 按门店分文件，数量动态（当前5个），缺失必须报错
@@ -178,7 +189,7 @@ sources:
     discovery_mode: "all"
     min_files: 5
     store_name_extract:
-      pattern: "麦芽田-报表中心（(.+?)）"
+      pattern: "麦芽田-报表中心-(.+?)\\.xlsx$"
     file_rules:
       - match: "麦芽田-报表中心*.xlsx"
         format: "xml_as_xlsx"
@@ -186,7 +197,8 @@ sources:
         target_table: "ods_rpa_maiyatian_delivery"
 
   # ================================================================
-  # 美团 — CSV(商品) + XLSX(账单)，按门店分文件
+  # 美团 — CSV(商品) + XLSX(账单+推广)，按门店分文件
+  # 门店: 小猴 / 善培臣（从文件名最后一段 -xxx.ext 提取）
   # 门店名从文件名自动提取，写入 _store_name 列
   # ================================================================
   meituan:
@@ -194,7 +206,7 @@ sources:
     folder: "【数据组】美团数据导出"
     discovery_mode: "all"
     store_name_extract:
-      pattern: "[（(](.+?)[)）]"
+      pattern: "-([^-]+)\\.[^.]+$"
     file_rules:
       # --- 商品明细 CSV ---
       - match: "美团-商品明细*.csv"
@@ -230,3 +242,15 @@ sources:
         skip_sheets:
           - "汇总信息"
           - "账单字段说明"
+
+      # --- 推广账单 XLSX（多 sheet）---
+      - match: "美团-推广账单*.xlsx"
+        format: "xlsx_multi_sheet"
+        sheets:
+          - sheet: "推广费流水"
+            header_row: 1
+            target_table: "ods_rpa_meituan_promotion_flow"
+
+          - sheet: "余额流水"
+            header_row: 1
+            target_table: "ods_rpa_meituan_promotion_balance"

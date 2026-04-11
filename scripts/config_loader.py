@@ -101,6 +101,8 @@ def load_sources(config_path: str | Path | None = None) -> SourcesManifest:
     sources = []
 
     for key, src in raw["sources"].items():
+        if not src.get("enabled", True):
+            continue
         file_rules = [_parse_file_rule(r) for r in src.get("file_rules", [])]
         sources.append(
             SourceConfig(
