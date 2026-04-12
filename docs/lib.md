@@ -234,7 +234,7 @@
 
 **小时达（长表）**：对账锚 `**SUM(结算金额)`** 按 `到家业务单号`（`ods_rpa_jd_finance` 行全加，符号已在列中）。**包装费（独立分项）**：`费用类型` ∈ {`**到家包装费`**, `**包装费**`}（字面以导出为准）**单独**做 `**SUM(结算金额)**`，**不计入**「商家补贴」分项（**账单未出该类型则当期该项不算**，见 `京东到家商家对账单验数.md` §1.1）。
 
-**到家（商家对账单宽表）**：对账锚 `**应结金额**`；列名与恒等式见 `**docs/京东到家商家对账单验数.md**`。口述「商家承担消费」在导出中为 `**商家承担小费**`，须按表头修正映射。
+**到家（商家对账单宽表）**：对账锚 `**应结金额**`；列名与恒等式见 `**docs/京东到家商家对账单验数.md**`。口述「商家承担消费」在导出中为 `**商家承担小费**`，须按表头修正映射。**ODS 入库状态**：⚠ 尚未入库，待建 `ods_rpa_jd_daojia_statement` 表。列名已从样本 `商家对账单_20260329.xlsx` 精确确定。
 
 **经营侧分项（小时达，`费用类型` 白名单）**——在样本「活动 / 商家补贴 / 财务运费 / 平台扣点」基础上，**包装费单独成项**（**不**并入商家补贴）：
 
@@ -311,13 +311,41 @@
          + 取件服务费(开票)(正向单展示远距离运费;售后单则展示达达售后运费)
          + 商家承担小费
          + 基础服务费
-         + 阶梯扣点佣金
-         + 餐盒费
+         + 阶梯扣点佣金          （表头有则纳入，可选列）
+         + 包装费                （表头有则纳入，可选列）
 ```
 
 - 开票金额永不入公式
 - 必须包含正向订单 + 退款订单 + 部分退款订单
 - **实结金额** = 应结金额 + 不可推导收支项（支出项为负数）
+
+**完整 49 列 → ODS 列映射**（待建表 `ods_rpa_jd_daojia_statement`，来源：`京东到家.xlsx` 实际表头）：
+
+入应结公式的 11 列：
+
+| Excel 表头 | ODS 列名 | P&L 分类 |
+|-----------|---------|---------|
+| `订单原价` | `order_original_price` | 挂网价/货款 |
+| `平台承担补贴(市场费)` | `platform_subsidy_market` | 活动补贴（平台） |
+| `商家承担货款补贴` | `merchant_goods_subsidy` | 商家补贴 |
+| `商家承担运费补贴` | `merchant_shipping_subsidy` | 商家补贴 |
+| `商家自送配送费` | `merchant_delivery_fee` | 配送费 |
+| `总佣金(货款佣金+运费佣金+餐盒费佣金)(可开票)` | `total_commission` | 平台扣点佣金 |
+| `取件服务费(开票)(正向单展示远距离运费;售后单则展示达达售后运费)` | `pickup_service_fee` | 配送费 |
+| `商家承担小费` | `merchant_tip` | 配送费 |
+| `基础服务费` | `basic_service_fee` | 平台扣点佣金 |
+| `阶梯扣点佣金` | `tiered_commission` | 平台扣点佣金（可选列） |
+| `包装费` | `packaging_fee` | 包装费（可选列） |
+
+锚值/参考列（不入公式）：`应结金额`→`settlement_amount`(锚值)、`用户支付货款`→`user_paid_goods`、`货款-定金`→`goods_deposit`、`总补贴(平台+商家承担补贴)`→`total_subsidy`(汇总)、`商家承担补贴(货款+运费)`→`merchant_subsidy_total`(汇总)、`餐盒费`→`meal_box_fee`(样本0)、`开票金额`→`invoice_amount`(❌永不入公式)
+
+维度列（13 列）：`商家id`→`merchant_id`、`商家名称`→`merchant_name`、`门店id`→`store_id`、`门店名称`→`store_name`、`订单号`→`order_no`(关联键)、`订单类型`→`order_type`、`下单时间`→`order_time`、`完成时间`→`complete_time`、`配送方式`→`delivery_method`、`订单渠道`→`order_channel`、`用户支付方式`→`payment_method`、`城市名称`→`city_name`、`父订单号`→`parent_order_no`
+
+结算元数据（9 列）：`账期`→`billing_period`、`结算单号`→`settlement_bill_no`、`结算单状态`→`settlement_status`、`结算完成时间`→`settlement_complete_time`、`订单序号`→`order_seq`、`关联单号`→`related_order_no`、`收付款单号`→`payment_bill_no`、`对账单业务类型`→`statement_biz_type`、`调账原因`→`adjustment_reason`
+
+新增待评估列（9 列，样本值均为 0，暂不入公式）：`礼品卡费用`→`gift_card_fee`、`线下收款应结`→`offline_settlement`、`平台货款补贴`→`platform_goods_subsidy`、`平台运费补贴`→`platform_shipping_subsidy`、`服务商服务费`→`service_provider_fee`、`平台补贴暂扣`→`platform_subsidy_withheld`、`京东白条免息`→`jd_baitiao_interest_free`、`问诊服务费`→`consultation_fee`、`赔付`→`compensation`
+
+> 完整分类详见 `field-registry-o2o-v1.md` 十二章京东到家应结公式
 
 **小时达（长表）应结金额**：
 

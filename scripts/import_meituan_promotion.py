@@ -46,7 +46,7 @@ def read_promotion_xlsx(path: str) -> list[tuple]:
         if i == 0:
             continue  # header
         store_id = row[0]
-        date_str = row[8]   # 转换日期 (已减 1 天): "2026-3-25"
+        date_str = row[8]   # 转换日期（业务归属日期，跨日扣款按此归日，规则 #39）
         amount_raw = row[9]  # 列1 = VALUE(金额)，负数
         store_name = row[7]  # 店铺（XLOOKUP 结果）
 
